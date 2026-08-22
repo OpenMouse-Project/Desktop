@@ -197,7 +197,6 @@ pub fn hid_list_interfaces(
 #[tauri::command]
 pub fn hid_open(
     app: tauri::AppHandle,
-    api_handle: tauri::State<HidApiHandle>,
     registry: tauri::State<HidRegistry>,
     vendor_id: u16,
     product_id: u16,
@@ -207,41 +206,50 @@ pub fn hid_open(
         return Ok(());
     }
 
-    let devices = with_hid_api(&api_handle, |api| {
-        let paths: Vec<_> = api
-            .device_list()
-            .filter(|info| {
-                info.vendor_id() == vendor_id
-                    && info.product_id() == product_id
-                    && !is_live_input_collection(info.usage_page(), info.usage())
-            })
-            .map(|info| info.path().to_owned())
-            .collect();
-        if paths.is_empty() {
-            return Err("No matching HID interface is currently connected.".into());
+    // Deliberately NOT the shared HidApiHandle used for listing: real-
+    // hardware testing showed a lasting input freeze that persisted even
+    // after the individual HidDevice was closed immediately post-read, and
+    // was fixed only by killing the whole process — never by closing our
+    // handle. That points at the long-lived, never-torn-down HidApi/
+    // IOHIDManager itself staying attached to whatever it has ever opened,
+    // not at the individual device handle. A fresh HidApi scoped to just
+    // this call, dropped at the end of this function, tests that theory:
+    // if it turns out not to be the actual cause either, revert this to
+    // the shared handle rather than stacking more one-off guesses.
+    let api = HidApi::new().map_err(|error| error.to_string())?;
+    let paths: Vec<_> = api
+        .device_list()
+        .filter(|info| {
+            info.vendor_id() == vendor_id
+                && info.product_id() == product_id
+                && !is_live_input_collection(info.usage_page(), info.usage())
+        })
+        .map(|info| info.path().to_owned())
+        .collect();
+    if paths.is_empty() {
+        return Err("No matching HID interface is currently connected.".into());
+    }
+    // Best-effort per path: a device with several top-level collections
+    // can have some open fine and others rejected for reasons that have
+    // nothing to do with the collection this brand's driver actually
+    // needs (a boot mouse/keyboard collection gated by macOS's Input
+    // Monitoring permission, for instance, sitting alongside the vendor
+    // collection a driver here actually talks to). Failing the whole
+    // group over one inaccessible split would block drivers that never
+    // needed that split in the first place. Only error out if literally
+    // none of them opened.
+    let mut devices = Vec::new();
+    let mut last_error = None;
+    for path in paths {
+        match api.open_path(&path) {
+            Ok(device) => devices.push(device),
+            Err(error) => last_error = Some(error.to_string()),
         }
-        // Best-effort per path: a device with several top-level collections
-        // can have some open fine and others rejected for reasons that have
-        // nothing to do with the collection this brand's driver actually
-        // needs (a boot mouse/keyboard collection gated by macOS's Input
-        // Monitoring permission, for instance, sitting alongside the vendor
-        // collection a driver here actually talks to). Failing the whole
-        // group over one inaccessible split would block drivers that never
-        // needed that split in the first place. Only error out if literally
-        // none of them opened.
-        let mut opened = Vec::new();
-        let mut last_error = None;
-        for path in paths {
-            match api.open_path(&path) {
-                Ok(device) => opened.push(device),
-                Err(error) => last_error = Some(error.to_string()),
-            }
-        }
-        if opened.is_empty() {
-            return Err(last_error.unwrap_or_else(|| "No HID interface could be opened.".into()));
-        }
-        Ok(opened)
-    })?;
+    }
+    if devices.is_empty() {
+        return Err(last_error.unwrap_or_else(|| "No HID interface could be opened.".into()));
+    }
+    drop(api);
 
     let key = interface_key(vendor_id, product_id);
     let mut splits = Vec::new();
