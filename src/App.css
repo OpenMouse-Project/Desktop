@@ -70,6 +70,32 @@ button:focus-visible {
   border-bottom: 1px solid var(--line);
 }
 
+.titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 100%;
+  padding-left: 0.75rem;
+  min-width: 0;
+}
+
+.titlebar-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.titlebar-badge {
+  font-size: 0.65rem;
+  color: var(--faint);
+  background: var(--control);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  white-space: nowrap;
+}
+
 .titlebar-drag {
   flex: 1;
   height: 100%;

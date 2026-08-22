@@ -13,7 +13,18 @@ import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import { allKnownVendorIds, candidatesForVendorId, type SupportedClient } from "./brands";
 import { listHidInterfaces, TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
 
-const PROBE_TIMEOUT_MS = 3000;
+// Generous: Logitech's HID++ driver alone can legitimately take several
+// seconds per candidate. `resolveDeviceIndex()` probes every receiver
+// pairing slot in turn (a Bolt/Unifying receiver can report several paired
+// devices), and each slot's own exchange timeout
+// (`REQUEST_TIMEOUT_MS`/`BOLT_INDEX_PROBE_TIMEOUT_MS` in
+// mouse-protocol/src/drivers/logitech/hidpp.ts) is 6000ms on its own — a
+// receiver with a few empty/foreign slots can burn through several of those
+// before reaching the right one. A shorter probe timeout here (3000ms was
+// tried first) makes `readStatus()` get cut off mid-probe and reads as "no
+// device", not as a real rejection — Logitech mice went undetected because
+// of this, not because the driver itself failed.
+const PROBE_TIMEOUT_MS = 8000;
 
 export interface ConnectedDevice {
   brand: string;

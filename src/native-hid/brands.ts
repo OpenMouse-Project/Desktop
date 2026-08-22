@@ -20,6 +20,7 @@
 import { AtkHidClient } from "@openmouse/protocol/drivers/atk/hid";
 import { AttackSharkHidClient } from "@openmouse/protocol/drivers/attackshark/hid";
 import { EggOp1HidClient } from "@openmouse/protocol/drivers/endgame/egg-op1-hid";
+import { EggWeHidClient } from "@openmouse/protocol/drivers/endgame/egg-we-hid";
 import { FantechHidClient } from "@openmouse/protocol/drivers/fantech/hid";
 import { FinalmouseHidClient } from "@openmouse/protocol/drivers/finalmouse/hid";
 import { GWolvesHidClient } from "@openmouse/protocol/drivers/gwolves/hid";
@@ -77,7 +78,18 @@ const client = (name: string, Client: new (device: HIDDevice) => unknown): Drive
 export const BRAND_DRIVERS: BrandEntry[] = [
   { brand: "Zaunkoenig", vendorIds: [0x0483], candidates: [client("ZaunkoenigHidClient", ZaunkoenigHidClient)] },
   { brand: "Finalmouse", vendorIds: [0x361d], candidates: [client("FinalmouseHidClient", FinalmouseHidClient)] },
-  { brand: "Endgame Gear", vendorIds: [0x3367], candidates: [client("EggOp1HidClient", EggOp1HidClient)] },
+  // EggWeHidClient (OP1we / wireless) is missing from OpenMouse-Bridge's own
+  // brands.mjs — its module only exposes `pickDevices`/`fromAuthorizedDevices`
+  // helpers for merging several browser-side HIDDevice objects into one
+  // logical mouse, which read as WebHID-only at a glance, but the
+  // constructor itself just takes a single `HIDDevice` like every other
+  // driver here — those helpers are unneeded (not incompatible) with
+  // TauriHidDevice, which already merges every split of one interface
+  // group into one synthetic device. So it belongs here.
+  { brand: "Endgame Gear", vendorIds: [0x3367], candidates: [
+    client("EggOp1HidClient", EggOp1HidClient),
+    client("EggWeHidClient", EggWeHidClient),
+  ] },
   // Real Pulsar-vendor (0x3710) mice, including the Pulsar 4K Wireless
   // Receiver (shared vendor id 0x3554 with Teevolution/VGN — see
   // pulsar-hid.ts's own vendor-id branching for how it tells those apart).

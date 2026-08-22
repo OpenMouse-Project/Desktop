@@ -15,11 +15,22 @@
 //! per interface, so devices here are grouped by (vendor id, product id,
 //! interface number) and every split within a group is opened together —
 //! same reasoning as the Node adapter's `candidateDevices()`.
-
+//!
+//! A single `HidApi` instance is kept alive for the app's whole lifetime
+//! (`HidApiHandle` below) and refreshed rather than recreated on every call.
+//! Repeatedly constructing throwaway `HidApi::new()` instances — one per
+//! command — was tried first and caused a real, reproducible regression:
+//! scanning would leave a currently-plugged-in mouse's own cursor input
+//! dead until the app quit, on hardware whose config protocol legitimately
+//! shares a HID collection with the mouse's own input reports (e.g. Razer —
+//! see `RazerHidClient.isSupported()`, which matches usage page 0x01/usage
+//! 0x02, literally the standard mouse collection). Recreating the
+//! underlying HID manager on every scan call repeatedly re-matched/attached
+//! to that collection; one shared, refreshed instance does not.
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use hidapi::HidApi;
@@ -58,57 +69,96 @@ struct OpenSplit {
     stop: Arc<AtomicBool>,
 }
 
+struct OpenGroup {
+    splits: Vec<Arc<OpenSplit>>,
+    readers: Vec<JoinHandle<()>>,
+}
+
+/// One `HidApi` for the app's lifetime — see the module docs above for why
+/// this matters, not just for efficiency.
+pub struct HidApiHandle(Mutex<Option<HidApi>>);
+
+impl Default for HidApiHandle {
+    fn default() -> Self {
+        HidApiHandle(Mutex::new(None))
+    }
+}
+
 #[derive(Default)]
-pub struct HidRegistry(Mutex<HashMap<(u16, u16, i32), Vec<Arc<OpenSplit>>>>);
+pub struct HidRegistry(Mutex<HashMap<(u16, u16, i32), OpenGroup>>);
 
 fn interface_key(vendor_id: u16, product_id: u16, interface_number: i32) -> String {
     format!("{vendor_id:04x}:{product_id:04x}:{interface_number}")
 }
 
-#[tauri::command]
-pub fn hid_list_interfaces(vendor_ids: Vec<u16>) -> Result<Vec<HidInterface>, String> {
-    let api = HidApi::new().map_err(|error| error.to_string())?;
-    let mut groups: HashMap<(u16, u16, i32), Vec<&hidapi::DeviceInfo>> = HashMap::new();
-    for info in api.device_list() {
-        if !vendor_ids.contains(&info.vendor_id()) {
-            continue;
+/// Runs `f` against the shared `HidApi`, initializing it on first use and
+/// refreshing its device list (cheap — no manager teardown/recreation) on
+/// every later call.
+fn with_hid_api<T>(
+    handle: &HidApiHandle,
+    f: impl FnOnce(&mut HidApi) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut guard = handle.0.lock().unwrap();
+    match guard.as_mut() {
+        Some(api) => {
+            api.refresh_devices().map_err(|error| error.to_string())?;
         }
-        groups
-            .entry((info.vendor_id(), info.product_id(), info.interface_number()))
-            .or_default()
-            .push(info);
+        None => {
+            *guard = Some(HidApi::new().map_err(|error| error.to_string())?);
+        }
     }
+    f(guard.as_mut().expect("just initialized above"))
+}
 
-    let mut result: Vec<HidInterface> = groups
-        .into_iter()
-        .map(|((vendor_id, product_id, interface_number), infos)| {
-            let product_string = infos
-                .iter()
-                .find_map(|info| info.product_string())
-                .unwrap_or("")
-                .to_string();
-            let manufacturer_string = infos
-                .iter()
-                .find_map(|info| info.manufacturer_string())
-                .unwrap_or("")
-                .to_string();
-            HidInterface {
-                key: interface_key(vendor_id, product_id, interface_number),
-                vendor_id,
-                product_id,
-                interface_number,
-                product_string,
-                manufacturer_string,
+#[tauri::command]
+pub fn hid_list_interfaces(
+    api_handle: tauri::State<HidApiHandle>,
+    vendor_ids: Vec<u16>,
+) -> Result<Vec<HidInterface>, String> {
+    with_hid_api(&api_handle, |api| {
+        let mut groups: HashMap<(u16, u16, i32), Vec<&hidapi::DeviceInfo>> = HashMap::new();
+        for info in api.device_list() {
+            if !vendor_ids.contains(&info.vendor_id()) {
+                continue;
             }
-        })
-        .collect();
-    result.sort_by(|a, b| a.key.cmp(&b.key));
-    Ok(result)
+            groups
+                .entry((info.vendor_id(), info.product_id(), info.interface_number()))
+                .or_default()
+                .push(info);
+        }
+
+        let mut result: Vec<HidInterface> = groups
+            .into_iter()
+            .map(|((vendor_id, product_id, interface_number), infos)| {
+                let product_string = infos
+                    .iter()
+                    .find_map(|info| info.product_string())
+                    .unwrap_or("")
+                    .to_string();
+                let manufacturer_string = infos
+                    .iter()
+                    .find_map(|info| info.manufacturer_string())
+                    .unwrap_or("")
+                    .to_string();
+                HidInterface {
+                    key: interface_key(vendor_id, product_id, interface_number),
+                    vendor_id,
+                    product_id,
+                    interface_number,
+                    product_string,
+                    manufacturer_string,
+                }
+            })
+            .collect();
+        result.sort_by(|a, b| a.key.cmp(&b.key));
+        Ok(result)
+    })
 }
 
 #[tauri::command]
 pub fn hid_open(
     app: tauri::AppHandle,
+    api_handle: tauri::State<HidApiHandle>,
     registry: tauri::State<HidRegistry>,
     vendor_id: u16,
     product_id: u16,
@@ -119,38 +169,43 @@ pub fn hid_open(
         return Ok(());
     }
 
-    let api = HidApi::new().map_err(|error| error.to_string())?;
-    let paths: Vec<_> = api
-        .device_list()
-        .filter(|info| {
-            info.vendor_id() == vendor_id
-                && info.product_id() == product_id
-                && info.interface_number() == interface_number
-        })
-        .map(|info| info.path().to_owned())
-        .collect();
-    if paths.is_empty() {
-        return Err("No matching HID interface is currently connected.".into());
-    }
+    let devices = with_hid_api(&api_handle, |api| {
+        let paths: Vec<_> = api
+            .device_list()
+            .filter(|info| {
+                info.vendor_id() == vendor_id
+                    && info.product_id() == product_id
+                    && info.interface_number() == interface_number
+            })
+            .map(|info| info.path().to_owned())
+            .collect();
+        if paths.is_empty() {
+            return Err("No matching HID interface is currently connected.".into());
+        }
+        paths
+            .into_iter()
+            .map(|path| api.open_path(&path).map_err(|error| error.to_string()))
+            .collect::<Result<Vec<_>, _>>()
+    })?;
 
     let key = interface_key(vendor_id, product_id, interface_number);
     let mut splits = Vec::new();
-    for path in paths {
-        let device = api.open_path(&path).map_err(|error| error.to_string())?;
+    let mut readers = Vec::new();
+    for device in devices {
         let stop = Arc::new(AtomicBool::new(false));
         let split = Arc::new(OpenSplit {
             device: Mutex::new(device),
             stop: stop.clone(),
         });
-        spawn_reader(app.clone(), key.clone(), split.clone());
+        readers.push(spawn_reader(app.clone(), key.clone(), split.clone()));
         splits.push(split);
     }
 
-    registry.0.lock().unwrap().insert(group_key, splits);
+    registry.0.lock().unwrap().insert(group_key, OpenGroup { splits, readers });
     Ok(())
 }
 
-fn spawn_reader(app: tauri::AppHandle, key: String, split: Arc<OpenSplit>) {
+fn spawn_reader(app: tauri::AppHandle, key: String, split: Arc<OpenSplit>) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut buffer = [0u8; 64];
         while !split.stop.load(Ordering::Relaxed) {
@@ -182,7 +237,7 @@ fn spawn_reader(app: tauri::AppHandle, key: String, split: Arc<OpenSplit>) {
                 }
             }
         }
-    });
+    })
 }
 
 #[tauri::command]
@@ -192,14 +247,22 @@ pub fn hid_close(
     product_id: u16,
     interface_number: i32,
 ) -> Result<(), String> {
-    if let Some(splits) = registry
+    let group = registry
         .0
         .lock()
         .unwrap()
-        .remove(&(vendor_id, product_id, interface_number))
-    {
-        for split in splits {
+        .remove(&(vendor_id, product_id, interface_number));
+    if let Some(group) = group {
+        for split in &group.splits {
             split.stop.store(true, Ordering::Relaxed);
+        }
+        // Joining here (instead of a fire-and-forget stop signal) means the
+        // underlying HID handles are guaranteed closed — and the OS has
+        // released the device — before this command returns, not up to
+        // READ_POLL_TIMEOUT_MS later. Bounded by that same timeout per
+        // reader, so this never blocks for long.
+        for reader in group.readers {
+            let _ = reader.join();
         }
     }
     Ok(())
@@ -272,10 +335,10 @@ fn with_open_group<T>(
     operation: impl FnOnce(&[Arc<OpenSplit>]) -> Result<T, String>,
 ) -> Result<T, String> {
     let map = registry.0.lock().unwrap();
-    let splits = map
+    let group = map
         .get(&(vendor_id, product_id, interface_number))
         .ok_or_else(|| "This HID interface is not open.".to_string())?;
-    operation(splits)
+    operation(&group.splits)
 }
 
 fn try_each(

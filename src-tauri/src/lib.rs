@@ -5,7 +5,7 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{LogicalSize, Manager, Size, State, WebviewWindow, WindowEvent};
 
 mod hid;
-use hid::HidRegistry;
+use hid::{HidApiHandle, HidRegistry};
 
 /// The two toggable app modes.
 ///
@@ -71,6 +71,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(ModeState(Mutex::new(AppMode::FullDesktop)))
         .manage(HidRegistry::default())
+        .manage(HidApiHandle::default())
         .invoke_handler(tauri::generate_handler![
             get_mode,
             set_mode,
