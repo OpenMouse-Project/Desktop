@@ -19,6 +19,10 @@
 // gating (most driver classes' static `isSupported()` checks `collections`
 // and will always return false against this adapter); construct the known
 // driver class directly instead — see `src/native-hid/brands.ts`.
+//
+// One device here == every HID collection sharing a (vendor id, product
+// id) pair, opened together (see hid.rs's module docs for why this is
+// keyed on vendor+product alone, not also an interface number).
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -27,7 +31,6 @@ export interface HidInterfaceInfo {
   key: string;
   vendorId: number;
   productId: number;
-  interfaceNumber: number;
   productString: string;
   manufacturerString: string;
 }
@@ -55,24 +58,18 @@ export class TauriHidDevice implements HIDDevice {
   readonly collections: readonly HIDCollectionInfo[] = [];
   opened = false;
 
-  private readonly interfaceNumber: number;
   private readonly listeners = new Set<(event: HIDInputReportEvent) => void>();
   private unlisten: UnlistenFn | null = null;
 
   constructor(info: HidInterfaceInfo) {
     this.vendorId = info.vendorId;
     this.productId = info.productId;
-    this.interfaceNumber = info.interfaceNumber;
     this.productName = info.productString;
   }
 
   async open(): Promise<void> {
     if (this.opened) return;
-    await invoke("hid_open", {
-      vendorId: this.vendorId,
-      productId: this.productId,
-      interfaceNumber: this.interfaceNumber,
-    });
+    await invoke("hid_open", { vendorId: this.vendorId, productId: this.productId });
     this.unlisten = await listen<HidInputReportPayload>("hid-input-report", (event) => {
       if (event.payload.key !== this.key()) return;
       const bytes = Uint8Array.from(event.payload.data);
@@ -94,11 +91,7 @@ export class TauriHidDevice implements HIDDevice {
     if (!this.opened) return;
     this.unlisten?.();
     this.unlisten = null;
-    await invoke("hid_close", {
-      vendorId: this.vendorId,
-      productId: this.productId,
-      interfaceNumber: this.interfaceNumber,
-    });
+    await invoke("hid_close", { vendorId: this.vendorId, productId: this.productId });
     this.opened = false;
   }
 
@@ -106,7 +99,6 @@ export class TauriHidDevice implements HIDDevice {
     await invoke("hid_send_report", {
       vendorId: this.vendorId,
       productId: this.productId,
-      interfaceNumber: this.interfaceNumber,
       reportId,
       data: Array.from(toBytes(data)),
     });
@@ -116,7 +108,6 @@ export class TauriHidDevice implements HIDDevice {
     await invoke("hid_send_feature_report", {
       vendorId: this.vendorId,
       productId: this.productId,
-      interfaceNumber: this.interfaceNumber,
       reportId,
       data: Array.from(toBytes(data)),
     });
@@ -126,7 +117,6 @@ export class TauriHidDevice implements HIDDevice {
     const bytes = await invoke<number[]>("hid_get_feature_report", {
       vendorId: this.vendorId,
       productId: this.productId,
-      interfaceNumber: this.interfaceNumber,
       reportId,
       length: 64,
     });
@@ -146,6 +136,6 @@ export class TauriHidDevice implements HIDDevice {
   private key(): string {
     const vendor = this.vendorId.toString(16).padStart(4, "0");
     const product = this.productId.toString(16).padStart(4, "0");
-    return `${vendor}:${product}:${this.interfaceNumber}`;
+    return `${vendor}:${product}`;
   }
 }

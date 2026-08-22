@@ -1,8 +1,14 @@
-// Scans every HID interface whose vendor id matches a known brand, and
-// tries each brand's candidate driver classes against it in turn — mirrors
-// `probe()`/`main()` in OpenMouse-Bridge's `native-hid/src/apply.mjs`, minus
-// the Node subprocess: this runs directly in the Tauri webview against
-// `TauriHidDevice`.
+// Two separate operations, deliberately kept apart:
+//
+// - `listCandidateInterfaces()` only enumerates HID interfaces (a plain
+//   hidapi device-list refresh) — it never opens anything, so it's safe to
+//   call freely and never risks the mouse-freeze bug a previous version of
+//   this file had from opening devices during a blind auto-scan.
+// - `connectToInterface()` actually opens ONE specific interface the user
+//   picked and tries each of its candidate driver classes in turn — mirrors
+//   `probe()`/`main()` in OpenMouse-Bridge's `native-hid/src/apply.mjs`,
+//   minus the Node subprocess: this runs directly in the Tauri webview
+//   against `TauriHidDevice`.
 //
 // `isSupported()` gating is skipped deliberately (see brands.ts) — a
 // candidate is accepted once its `open()` and `readStatus()` both succeed
@@ -26,6 +32,12 @@ import { listHidInterfaces, TauriHidDevice, type HidInterfaceInfo } from "./taur
 // of this, not because the driver itself failed.
 const PROBE_TIMEOUT_MS = 8000;
 
+export interface CandidateInterface {
+  info: HidInterfaceInfo;
+  /** Brand(s) whose driver(s) might answer on this interface. */
+  brands: string[];
+}
+
 export interface ConnectedDevice {
   brand: string;
   client: SupportedClient;
@@ -43,45 +55,39 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-async function probe(
-  info: HidInterfaceInfo,
-  brand: string,
-  candidateName: string,
-  Client: new (device: HIDDevice) => SupportedClient,
-): Promise<ConnectedDevice> {
-  const device = new TauriHidDevice(info);
-  const client = new Client(device);
-  try {
-    await withTimeout(client.open(), PROBE_TIMEOUT_MS, `${candidateName}.open()`);
-    const status = await withTimeout(client.readStatus(), PROBE_TIMEOUT_MS, `${candidateName}.readStatus()`);
-    return { brand, client, device, status };
-  } catch (error) {
-    await client.close().catch(() => undefined);
-    throw error;
-  }
+/**
+ * Every currently-connected HID interface that at least one known brand's
+ * driver might answer on. Read-only — nothing here opens a device.
+ */
+export async function listCandidateInterfaces(): Promise<CandidateInterface[]> {
+  const interfaces = await listHidInterfaces(allKnownVendorIds());
+  return interfaces
+    .map((info) => ({
+      info,
+      brands: [...new Set(candidatesForVendorId(info.vendorId).map((candidate) => candidate.brand))],
+    }))
+    .filter((candidate) => candidate.brands.length > 0);
 }
 
 /**
- * Tries every known brand's candidates against every matching HID
- * interface currently connected, and returns the first one that answers.
- * Resolves to `null` (not a rejection) when nothing does — that's the
- * expected "no supported mouse plugged in" case, not an error.
+ * Opens one specific interface (as picked from `listCandidateInterfaces()`)
+ * and tries each of its candidate driver classes in turn, first success
+ * wins. Throws with the attempted candidates' errors when none answer.
  */
-export async function scanForDevice(): Promise<ConnectedDevice | null> {
-  const interfaces = await listHidInterfaces(allKnownVendorIds());
+export async function connectToInterface(info: HidInterfaceInfo): Promise<ConnectedDevice> {
   const attempts: string[] = [];
-  for (const info of interfaces) {
-    for (const candidate of candidatesForVendorId(info.vendorId)) {
-      try {
-        return await probe(info, candidate.brand, candidate.name, candidate.Client);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        attempts.push(`${candidate.name} on ${info.productString || "unknown device"}: ${message}`);
-      }
+  for (const candidate of candidatesForVendorId(info.vendorId)) {
+    const device = new TauriHidDevice(info);
+    const client = new candidate.Client(device);
+    try {
+      await withTimeout(client.open(), PROBE_TIMEOUT_MS, `${candidate.name}.open()`);
+      const status = await withTimeout(client.readStatus(), PROBE_TIMEOUT_MS, `${candidate.name}.readStatus()`);
+      return { brand: candidate.brand, client, device, status };
+    } catch (error) {
+      await client.close().catch(() => undefined);
+      const message = error instanceof Error ? error.message : String(error);
+      attempts.push(`${candidate.name}: ${message}`);
     }
   }
-  if (attempts.length > 0) {
-    console.info(`[native-hid] no device answered. Tried:\n  ${attempts.join("\n  ")}`);
-  }
-  return null;
+  throw new Error(`No driver answered on this interface. Tried:\n  ${attempts.join("\n  ")}`);
 }

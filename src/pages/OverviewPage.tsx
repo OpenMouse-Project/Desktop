@@ -1,38 +1,59 @@
 import { useEffect, useState } from "preact/hooks";
-import { Battery, Cpu, Mouse, RefreshCw, Usb } from "lucide-preact";
-import { scanForDevice, type ConnectedDevice } from "../native-hid/scan";
+import { ArrowLeft, Battery, Cpu, Mouse, RefreshCw, Usb } from "lucide-preact";
+import {
+  connectToInterface,
+  listCandidateInterfaces,
+  type CandidateInterface,
+  type ConnectedDevice,
+} from "../native-hid/scan";
 
-type ScanState =
-  | { status: "scanning" }
-  | { status: "found"; device: ConnectedDevice }
-  | { status: "not-found" }
+type ListState =
+  | { status: "loading" }
+  | { status: "loaded"; candidates: CandidateInterface[] }
   | { status: "error"; message: string };
 
 export function OverviewPage() {
-  const [state, setState] = useState<ScanState>({ status: "scanning" });
+  const [list, setList] = useState<ListState>({ status: "loading" });
+  const [connected, setConnected] = useState<ConnectedDevice | null>(null);
+  const [connectingKey, setConnectingKey] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
-  async function scan() {
-    setState({ status: "scanning" });
+  async function refresh() {
+    setList({ status: "loading" });
     try {
-      const device = await scanForDevice();
-      setState(device ? { status: "found", device } : { status: "not-found" });
+      const candidates = await listCandidateInterfaces();
+      setList({ status: "loaded", candidates });
     } catch (error) {
-      setState({ status: "error", message: error instanceof Error ? error.message : String(error) });
+      setList({ status: "error", message: error instanceof Error ? error.message : String(error) });
     }
   }
 
   useEffect(() => {
-    void scan();
-    // Only the open connection (if any) needs cleanup on unmount — a
-    // scan still in flight has nothing live to close yet.
-    return () => {
-      if (state.status === "found") void state.device.client.close().catch(() => undefined);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void refresh();
   }, []);
 
-  if (state.status === "found") {
-    const { status } = state.device;
+  async function connect(candidate: CandidateInterface) {
+    setConnectingKey(candidate.info.key);
+    setConnectError(null);
+    try {
+      const device = await connectToInterface(candidate.info);
+      setConnected(device);
+    } catch (error) {
+      setConnectError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setConnectingKey(null);
+    }
+  }
+
+  async function disconnect() {
+    if (!connected) return;
+    await connected.client.close().catch(() => undefined);
+    setConnected(null);
+    void refresh();
+  }
+
+  if (connected) {
+    const { status } = connected;
     return (
       <section class="page">
         <div class="device-card">
@@ -40,10 +61,10 @@ export function OverviewPage() {
             <Mouse size={22} aria-hidden="true" />
             <div>
               <h2>{status.name}</h2>
-              <p class="device-card-brand">{state.device.brand}</p>
+              <p class="device-card-brand">{connected.brand}</p>
             </div>
-            <button class="rescan-button" onClick={() => void scan()} title="Rescan">
-              <RefreshCw size={14} />
+            <button class="rescan-button" onClick={() => void disconnect()} title="Back to device list">
+              <ArrowLeft size={14} /> Back
             </button>
           </div>
 
@@ -78,28 +99,54 @@ export function OverviewPage() {
 
   return (
     <section class="page">
-      <div class="empty-state">
-        {state.status === "scanning" ? (
-          <>
-            <Usb class="empty-state-icon spin" size={40} aria-hidden="true" />
-            <h2>Scanning for devices…</h2>
-            <p>Checking connected HID interfaces for a supported mouse.</p>
-          </>
-        ) : (
-          <>
-            <Mouse class="empty-state-icon" size={40} aria-hidden="true" />
-            <h2>{state.status === "error" ? "Scan failed" : "No device connected"}</h2>
-            <p>
-              {state.status === "error"
-                ? state.message
-                : "Connect a supported mouse over USB or a receiver to see its DPI, polling rate, battery, and firmware here."}
-            </p>
-            <button class="rescan-button rescan-button-standalone" onClick={() => void scan()}>
-              <RefreshCw size={14} /> Scan again
-            </button>
-          </>
-        )}
+      <div class="device-list-header">
+        <h1 class="page-title">Devices</h1>
+        <button class="rescan-button" onClick={() => void refresh()} disabled={list.status === "loading"}>
+          <RefreshCw size={14} class={list.status === "loading" ? "spin" : ""} /> Refresh
+        </button>
       </div>
+
+      {list.status === "error" && (
+        <div class="empty-state">
+          <h2>Couldn't list HID devices</h2>
+          <p>{list.message}</p>
+        </div>
+      )}
+
+      {list.status === "loaded" && list.candidates.length === 0 && (
+        <div class="empty-state">
+          <Usb class="empty-state-icon" size={40} aria-hidden="true" />
+          <h2>No supported devices found</h2>
+          <p>Connect a supported mouse over USB or a receiver, then refresh.</p>
+        </div>
+      )}
+
+      {list.status === "loaded" && list.candidates.length > 0 && (
+        <ul class="device-list">
+          {list.candidates.map((candidate) => (
+            <li class="device-list-row" key={candidate.info.key}>
+              <div class="device-list-row-info">
+                <span class="device-list-row-name">
+                  {candidate.info.productString || "Unknown device"}
+                </span>
+                <span class="device-list-row-meta">
+                  {candidate.brands.join(" / ")} · {candidate.info.vendorId.toString(16).padStart(4, "0")}:
+                  {candidate.info.productId.toString(16).padStart(4, "0")}
+                </span>
+              </div>
+              <button
+                class="connect-button"
+                disabled={connectingKey === candidate.info.key}
+                onClick={() => void connect(candidate)}
+              >
+                {connectingKey === candidate.info.key ? "Connecting…" : "Connect"}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {connectError && <p class="connect-error">{connectError}</p>}
     </section>
   );
 }

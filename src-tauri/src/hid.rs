@@ -12,9 +12,22 @@
 //! One WebHID `HIDDevice` == one USB/BT *interface*, which can carry several
 //! top-level HID collections (e.g. a short and a long report variant on the
 //! same vendor interface). hidapi enumerates one entry *per collection*, not
-//! per interface, so devices here are grouped by (vendor id, product id,
-//! interface number) and every split within a group is opened together —
-//! same reasoning as the Node adapter's `candidateDevices()`.
+//! per interface, so every collection sharing a (vendor id, product id) pair
+//! is grouped and opened together as one logical device.
+//!
+//! This used to group by (vendor id, product id, interface number) instead —
+//! mirroring the Node adapter's `candidateDevices()` — but `interface_number`
+//! turned out to not be stable across separate `device_list()` calls on
+//! macOS for several real devices (a Logitech receiver, a Wooting keyboard),
+//! producing a different number per enumeration for what was the same
+//! physical collection. That surfaced as duplicate rows in the device list
+//! (the same physical device appearing under several different keys) and, on
+//! connect, an "exclusive access, device already open" hidapi error (list
+//! time and open time disagreeing on which path a given key meant). Vendor +
+//! product id alone is coarser — two genuinely different physical devices
+//! that happen to share both ids would incorrectly merge into one entry —
+//! but that's a rare edge case, and it's stable, which interface_number is
+//! not on this platform.
 //!
 //! A single `HidApi` instance is kept alive for the app's whole lifetime
 //! (`HidApiHandle` below) and refreshed rather than recreated on every call.
@@ -48,8 +61,6 @@ pub struct HidInterface {
     pub vendor_id: u16,
     #[serde(rename = "productId")]
     pub product_id: u16,
-    #[serde(rename = "interfaceNumber")]
-    pub interface_number: i32,
     #[serde(rename = "productString")]
     pub product_string: String,
     #[serde(rename = "manufacturerString")]
@@ -85,10 +96,10 @@ impl Default for HidApiHandle {
 }
 
 #[derive(Default)]
-pub struct HidRegistry(Mutex<HashMap<(u16, u16, i32), OpenGroup>>);
+pub struct HidRegistry(Mutex<HashMap<(u16, u16), OpenGroup>>);
 
-fn interface_key(vendor_id: u16, product_id: u16, interface_number: i32) -> String {
-    format!("{vendor_id:04x}:{product_id:04x}:{interface_number}")
+fn interface_key(vendor_id: u16, product_id: u16) -> String {
+    format!("{vendor_id:04x}:{product_id:04x}")
 }
 
 /// Runs `f` against the shared `HidApi`, initializing it on first use and
@@ -116,20 +127,17 @@ pub fn hid_list_interfaces(
     vendor_ids: Vec<u16>,
 ) -> Result<Vec<HidInterface>, String> {
     with_hid_api(&api_handle, |api| {
-        let mut groups: HashMap<(u16, u16, i32), Vec<&hidapi::DeviceInfo>> = HashMap::new();
+        let mut groups: HashMap<(u16, u16), Vec<&hidapi::DeviceInfo>> = HashMap::new();
         for info in api.device_list() {
             if !vendor_ids.contains(&info.vendor_id()) {
                 continue;
             }
-            groups
-                .entry((info.vendor_id(), info.product_id(), info.interface_number()))
-                .or_default()
-                .push(info);
+            groups.entry((info.vendor_id(), info.product_id())).or_default().push(info);
         }
 
         let mut result: Vec<HidInterface> = groups
             .into_iter()
-            .map(|((vendor_id, product_id, interface_number), infos)| {
+            .map(|((vendor_id, product_id), infos)| {
                 let product_string = infos
                     .iter()
                     .find_map(|info| info.product_string())
@@ -141,10 +149,9 @@ pub fn hid_list_interfaces(
                     .unwrap_or("")
                     .to_string();
                 HidInterface {
-                    key: interface_key(vendor_id, product_id, interface_number),
+                    key: interface_key(vendor_id, product_id),
                     vendor_id,
                     product_id,
-                    interface_number,
                     product_string,
                     manufacturer_string,
                 }
@@ -162,9 +169,8 @@ pub fn hid_open(
     registry: tauri::State<HidRegistry>,
     vendor_id: u16,
     product_id: u16,
-    interface_number: i32,
 ) -> Result<(), String> {
-    let group_key = (vendor_id, product_id, interface_number);
+    let group_key = (vendor_id, product_id);
     if registry.0.lock().unwrap().contains_key(&group_key) {
         return Ok(());
     }
@@ -172,11 +178,7 @@ pub fn hid_open(
     let devices = with_hid_api(&api_handle, |api| {
         let paths: Vec<_> = api
             .device_list()
-            .filter(|info| {
-                info.vendor_id() == vendor_id
-                    && info.product_id() == product_id
-                    && info.interface_number() == interface_number
-            })
+            .filter(|info| info.vendor_id() == vendor_id && info.product_id() == product_id)
             .map(|info| info.path().to_owned())
             .collect();
         if paths.is_empty() {
@@ -188,7 +190,7 @@ pub fn hid_open(
             .collect::<Result<Vec<_>, _>>()
     })?;
 
-    let key = interface_key(vendor_id, product_id, interface_number);
+    let key = interface_key(vendor_id, product_id);
     let mut splits = Vec::new();
     let mut readers = Vec::new();
     for device in devices {
@@ -245,13 +247,8 @@ pub fn hid_close(
     registry: tauri::State<HidRegistry>,
     vendor_id: u16,
     product_id: u16,
-    interface_number: i32,
 ) -> Result<(), String> {
-    let group = registry
-        .0
-        .lock()
-        .unwrap()
-        .remove(&(vendor_id, product_id, interface_number));
+    let group = registry.0.lock().unwrap().remove(&(vendor_id, product_id));
     if let Some(group) = group {
         for split in &group.splits {
             split.stop.store(true, Ordering::Relaxed);
@@ -273,11 +270,10 @@ pub fn hid_send_report(
     registry: tauri::State<HidRegistry>,
     vendor_id: u16,
     product_id: u16,
-    interface_number: i32,
     report_id: u8,
     data: Vec<u8>,
 ) -> Result<(), String> {
-    with_open_group(&registry, vendor_id, product_id, interface_number, |splits| {
+    with_open_group(&registry, vendor_id, product_id, |splits| {
         let mut frame = Vec::with_capacity(data.len() + 1);
         frame.push(report_id);
         frame.extend_from_slice(&data);
@@ -290,11 +286,10 @@ pub fn hid_send_feature_report(
     registry: tauri::State<HidRegistry>,
     vendor_id: u16,
     product_id: u16,
-    interface_number: i32,
     report_id: u8,
     data: Vec<u8>,
 ) -> Result<(), String> {
-    with_open_group(&registry, vendor_id, product_id, interface_number, |splits| {
+    with_open_group(&registry, vendor_id, product_id, |splits| {
         let mut frame = Vec::with_capacity(data.len() + 1);
         frame.push(report_id);
         frame.extend_from_slice(&data);
@@ -307,11 +302,10 @@ pub fn hid_get_feature_report(
     registry: tauri::State<HidRegistry>,
     vendor_id: u16,
     product_id: u16,
-    interface_number: i32,
     report_id: u8,
     length: usize,
 ) -> Result<Vec<u8>, String> {
-    with_open_group(&registry, vendor_id, product_id, interface_number, |splits| {
+    with_open_group(&registry, vendor_id, product_id, |splits| {
         let mut result: Option<Vec<u8>> = None;
         let outcome = try_each(splits, |device| {
             let mut buffer = vec![0u8; length + 1];
@@ -331,12 +325,11 @@ fn with_open_group<T>(
     registry: &tauri::State<HidRegistry>,
     vendor_id: u16,
     product_id: u16,
-    interface_number: i32,
     operation: impl FnOnce(&[Arc<OpenSplit>]) -> Result<T, String>,
 ) -> Result<T, String> {
     let map = registry.0.lock().unwrap();
     let group = map
-        .get(&(vendor_id, product_id, interface_number))
+        .get(&(vendor_id, product_id))
         .ok_or_else(|| "This HID interface is not open.".to_string())?;
     operation(&group.splits)
 }
