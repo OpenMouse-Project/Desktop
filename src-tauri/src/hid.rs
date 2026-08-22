@@ -262,9 +262,20 @@ fn spawn_reader(app: tauri::AppHandle, key: String, split: Arc<OpenSplit>) -> Jo
     thread::spawn(move || {
         let mut buffer = [0u8; 64];
         while !split.stop.load(Ordering::Relaxed) {
-            let read = {
-                let device = split.device.lock().unwrap();
-                device.read_timeout(&mut buffer, READ_POLL_TIMEOUT_MS)
+            // try_lock, not lock: a query/response exchange (hid_send_report
+            // / hid_get_feature_report, called from the JS driver's own
+            // readStatus()) needs this same device's lock and must never
+            // wait behind this loop's read — reads are continuous and
+            // best-effort (missing one poll cycle is fine), but a stuck
+            // query is what "Connecting…" hanging looked like. If a writer
+            // currently holds the lock, skip this cycle instead of blocking
+            // for it.
+            let read = match split.device.try_lock() {
+                Ok(device) => device.read_timeout(&mut buffer, READ_POLL_TIMEOUT_MS),
+                Err(_) => {
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
             };
             match read {
                 Ok(0) => continue,
