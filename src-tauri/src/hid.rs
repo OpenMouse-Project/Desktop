@@ -184,10 +184,27 @@ pub fn hid_open(
         if paths.is_empty() {
             return Err("No matching HID interface is currently connected.".into());
         }
-        paths
-            .into_iter()
-            .map(|path| api.open_path(&path).map_err(|error| error.to_string()))
-            .collect::<Result<Vec<_>, _>>()
+        // Best-effort per path: a device with several top-level collections
+        // can have some open fine and others rejected for reasons that have
+        // nothing to do with the collection this brand's driver actually
+        // needs (a boot mouse/keyboard collection gated by macOS's Input
+        // Monitoring permission, for instance, sitting alongside the vendor
+        // collection a driver here actually talks to). Failing the whole
+        // group over one inaccessible split would block drivers that never
+        // needed that split in the first place. Only error out if literally
+        // none of them opened.
+        let mut opened = Vec::new();
+        let mut last_error = None;
+        for path in paths {
+            match api.open_path(&path) {
+                Ok(device) => opened.push(device),
+                Err(error) => last_error = Some(error.to_string()),
+            }
+        }
+        if opened.is_empty() {
+            return Err(last_error.unwrap_or_else(|| "No HID interface could be opened.".into()));
+        }
+        Ok(opened)
     })?;
 
     let key = interface_key(vendor_id, product_id);
