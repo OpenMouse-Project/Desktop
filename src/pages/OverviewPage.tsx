@@ -45,9 +45,10 @@ export function OverviewPage() {
     }
   }
 
-  async function disconnect() {
-    if (!connected) return;
-    await connected.client.close().catch(() => undefined);
+  // The device was already read once and closed immediately in
+  // connectToInterface() — nothing here holds a live connection open, so
+  // "Back" is just clearing the snapshot, not disconnecting anything.
+  function backToList() {
     setConnected(null);
     void refresh();
   }
@@ -63,7 +64,7 @@ export function OverviewPage() {
               <h2>{status.name}</h2>
               <p class="device-card-brand">{connected.brand}</p>
             </div>
-            <button class="rescan-button" onClick={() => void disconnect()} title="Back to device list">
+            <button class="rescan-button" onClick={backToList} title="Back to device list">
               <ArrowLeft size={14} /> Back
             </button>
           </div>

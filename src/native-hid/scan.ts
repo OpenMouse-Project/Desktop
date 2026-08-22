@@ -16,7 +16,7 @@
 // apply.mjs uses.
 
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
-import { allKnownVendorIds, candidatesForVendorId, type SupportedClient } from "./brands";
+import { allKnownVendorIds, candidatesForVendorId } from "./brands";
 import { listHidInterfaces, TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
 
 // Generous: Logitech's HID++ driver alone can legitimately take several
@@ -40,8 +40,6 @@ export interface CandidateInterface {
 
 export interface ConnectedDevice {
   brand: string;
-  client: SupportedClient;
-  device: TauriHidDevice;
   status: MouseStatus;
 }
 
@@ -70,9 +68,18 @@ export async function listCandidateInterfaces(): Promise<CandidateInterface[]> {
 }
 
 /**
- * Opens one specific interface (as picked from `listCandidateInterfaces()`)
- * and tries each of its candidate driver classes in turn, first success
- * wins. Throws with the attempted candidates' errors when none answer.
+ * Opens one specific interface (as picked from `listCandidateInterfaces()`),
+ * tries each of its candidate driver classes in turn until one answers, and
+ * closes it again immediately after reading its status once — this never
+ * stays open in the background. Reproduced on real hardware: leaving a
+ * device open with a continuously-running background reader (needed for
+ * request/response protocols that reply via input reports, not feature
+ * reports) froze the device's own input for as long as the connection
+ * stayed open, on more than one brand/collection — not tied to a specific
+ * usage page after all. Read once, release immediately, and re-open only
+ * for an explicit user action (a manual refresh, or eventually a write)
+ * until that's understood well enough to hold a connection open safely.
+ * Throws with the attempted candidates' errors when none answer.
  */
 export async function connectToInterface(info: HidInterfaceInfo): Promise<ConnectedDevice> {
   const attempts: string[] = [];
@@ -82,7 +89,8 @@ export async function connectToInterface(info: HidInterfaceInfo): Promise<Connec
     try {
       await withTimeout(client.open(), PROBE_TIMEOUT_MS, `${candidate.name}.open()`);
       const status = await withTimeout(client.readStatus(), PROBE_TIMEOUT_MS, `${candidate.name}.readStatus()`);
-      return { brand: candidate.brand, client, device, status };
+      await client.close().catch(() => undefined);
+      return { brand: candidate.brand, status };
     } catch (error) {
       await client.close().catch(() => undefined);
       const message = error instanceof Error ? error.message : String(error);
