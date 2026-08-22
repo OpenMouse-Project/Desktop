@@ -136,8 +136,21 @@ fn with_hid_api<T>(
             api.refresh_devices().map_err(|error| error.to_string())?;
         }
         None => {
+            // EXPERIMENT (see module docs): non-exclusive open
+            // (`set_open_exclusive(false)`) stopped the freeze but made
+            // every GetFeatureReport call fail with an I/O timeout on
+            // Endgame Gear's OP1-8K — its control-transfer protocol may
+            // require exclusive access to work at all. Deliberately NOT
+            // calling set_open_exclusive here (exclusive is hidapi's
+            // default on macOS), testing whether a brief exclusive open —
+            // already closed immediately after one read, see
+            // connectToInterface() on the TS side — produces a short,
+            // tolerable freeze instead of exclusive mode's previous lasting
+            // one, now that the open/read/close window is as short as
+            // possible. If this is still a serious freeze, bring back
+            // `api.set_open_exclusive(false);` rather than guessing
+            // further.
             let api = HidApi::new().map_err(|error| error.to_string())?;
-            api.set_open_exclusive(false);
             *guard = Some(api);
         }
     }
