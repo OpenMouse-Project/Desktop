@@ -34,7 +34,10 @@ body,
 body {
   margin: 0;
   min-width: 280px;
-  background: var(--ink);
+  /* Transparent so the window's own rounded corners (see
+     .full-desktop-shell / .bridge-view below) show the desktop through
+     them instead of a square-cornered solid fill. */
+  background: transparent;
   color: var(--text);
   font-family: var(--font-sans);
   font-synthesis: none;
@@ -223,6 +226,8 @@ button:focus-visible {
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+  border-radius: 10px;
+  background: var(--ink);
 }
 
 .full-desktop-view {
@@ -600,6 +605,7 @@ button:focus-visible {
   width: 100vw;
   background: var(--ink);
   overflow: hidden;
+  border-radius: 10px;
 }
 
 .bridge-header {

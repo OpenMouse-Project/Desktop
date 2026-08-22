@@ -15,7 +15,9 @@
         "title": "OpenMouse Desktop",
         "width": 800,
         "height": 600,
-        "decorations": false
+        "decorations": false,
+        "transparent": true,
+        "shadow": true
       }
     ],
     "security": {

@@ -29,6 +29,24 @@
 //! but that's a rare edge case, and it's stable, which interface_number is
 //! not on this platform.
 //!
+//! **Never opened, at all**: the HID usage page/usage pair a mouse's actual
+//! pointer-motion collection and a keyboard's actual keystroke collection
+//! use (Generic Desktop page 0x01, usage 0x02 "Mouse" / usage 0x06
+//! "Keyboard"). This was tried without exclusion once, after macOS's Input
+//! Monitoring permission had been granted to the dev binary, and it froze
+//! both the physical mouse's cursor AND the app itself — opening that
+//! specific collection via raw hidapi access competes with the OS's own
+//! live consumption of it for actual cursor movement/keystroke delivery,
+//! not just its config channel. `has_excluded_usage()` below filters those
+//! out at both list and open time, unconditionally, regardless of which
+//! brand's driver is asking. The real, accepted cost: Razer's driver
+//! classes (`RazerHidClient`, `RazerViperHidClient`,
+//! `RazerViperMiniHidClient`, `RazerCobraHidClient`) all key their protocol
+//! on exactly usage page 0x01/usage 0x02 — see their own
+//! `isSupported()` — so Razer mice are not reachable through this bridge.
+//! `PulsarProHidClient` also matches usage page 1, but usage 0 ("Undefined")
+//! rather than 2 — not a live input collection, so it stays allowed.
+//!
 //! A single `HidApi` instance is kept alive for the app's whole lifetime
 //! (`HidApiHandle` below) and refreshed rather than recreated on every call.
 //! Repeatedly constructing throwaway `HidApi::new()` instances — one per
@@ -102,6 +120,13 @@ fn interface_key(vendor_id: u16, product_id: u16) -> String {
     format!("{vendor_id:04x}:{product_id:04x}")
 }
 
+/// Generic Desktop (page 0x01) Mouse (usage 0x02) or Keyboard (usage 0x06) —
+/// the collection an OS actively reads for real cursor motion or keystrokes.
+/// See the module docs above for why this is never opened, unconditionally.
+fn is_live_input_collection(usage_page: u16, usage: u16) -> bool {
+    usage_page == 0x01 && (usage == 0x02 || usage == 0x06)
+}
+
 /// Runs `f` against the shared `HidApi`, initializing it on first use and
 /// refreshing its device list (cheap — no manager teardown/recreation) on
 /// every later call.
@@ -132,9 +157,16 @@ pub fn hid_list_interfaces(
             if !vendor_ids.contains(&info.vendor_id()) {
                 continue;
             }
+            if is_live_input_collection(info.usage_page(), info.usage()) {
+                continue;
+            }
             groups.entry((info.vendor_id(), info.product_id())).or_default().push(info);
         }
 
+        // A device whose only matching collection(s) were the live input
+        // one just excluded above (e.g. Razer) legitimately has nothing
+        // left here — it simply won't appear in the list, which is correct:
+        // there is nothing safe to open for it.
         let mut result: Vec<HidInterface> = groups
             .into_iter()
             .map(|((vendor_id, product_id), infos)| {
@@ -178,7 +210,11 @@ pub fn hid_open(
     let devices = with_hid_api(&api_handle, |api| {
         let paths: Vec<_> = api
             .device_list()
-            .filter(|info| info.vendor_id() == vendor_id && info.product_id() == product_id)
+            .filter(|info| {
+                info.vendor_id() == vendor_id
+                    && info.product_id() == product_id
+                    && !is_live_input_collection(info.usage_page(), info.usage())
+            })
             .map(|info| info.path().to_owned())
             .collect();
         if paths.is_empty() {
