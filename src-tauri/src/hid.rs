@@ -49,6 +49,19 @@
 //! no reason to open those collections, and Razer's driver classes are the
 //! only ones that need to (see `is_live_input_collection`).
 //!
+//! **Known gap, confirmed on real hardware, not yet solved:** at least one
+//! device (Endgame Gear's OP1-8K) answers `GetFeatureReport` with an I/O
+//! timeout when opened non-exclusively — its control-transfer protocol
+//! appears to require exclusive HID access to work at all. Exclusive access
+//! was tried again with the shortest possible open/one-read/close window
+//! and still froze the device's own input immediately, so duration is not
+//! a mitigating factor. Non-exclusive stays the default because freezing a
+//! user's real mouse/keyboard is a worse failure than a device's config
+//! protocol not answering — a device that needs exclusive access to
+//! function is presently unreachable through this bridge, same category of
+//! gap as Razer (see `brands.ts`), not a bug to "fix" by bringing exclusive
+//! mode back.
+//!
 //! A single `HidApi` instance is kept alive for the app's whole lifetime
 //! (`HidApiHandle` below) and refreshed rather than recreated on every
 //! call — simpler and cheaper than a fresh instance per call, and (now that
@@ -136,21 +149,22 @@ fn with_hid_api<T>(
             api.refresh_devices().map_err(|error| error.to_string())?;
         }
         None => {
-            // EXPERIMENT (see module docs): non-exclusive open
-            // (`set_open_exclusive(false)`) stopped the freeze but made
-            // every GetFeatureReport call fail with an I/O timeout on
-            // Endgame Gear's OP1-8K — its control-transfer protocol may
-            // require exclusive access to work at all. Deliberately NOT
-            // calling set_open_exclusive here (exclusive is hidapi's
-            // default on macOS), testing whether a brief exclusive open —
-            // already closed immediately after one read, see
-            // connectToInterface() on the TS side — produces a short,
-            // tolerable freeze instead of exclusive mode's previous lasting
-            // one, now that the open/read/close window is as short as
-            // possible. If this is still a serious freeze, bring back
-            // `api.set_open_exclusive(false);` rather than guessing
-            // further.
             let api = HidApi::new().map_err(|error| error.to_string())?;
+            // CONFIRMED on real hardware: exclusive open freezes the
+            // device's own input (mouse cursor/keyboard keys) the moment
+            // it's opened — reproduced even with the shortest possible
+            // open/one-read/close window, so duration was never the
+            // mitigating factor. Non-exclusive avoids that entirely. The
+            // real cost: at least one device's (Endgame Gear OP1-8K)
+            // GetFeatureReport-based protocol needs exclusive access to
+            // answer at all and fails outright non-exclusively — a genuine
+            // conflict between "don't freeze the user's hardware" and
+            // "every protocol variant works." Freezing real input is the
+            // worse failure mode, so non-exclusive wins here. A device
+            // whose protocol needs exclusive access is a documented gap
+            // (see brands.ts), not something to solve by reintroducing the
+            // freeze.
+            api.set_open_exclusive(false);
             *guard = Some(api);
         }
     }

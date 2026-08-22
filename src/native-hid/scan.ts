@@ -62,7 +62,7 @@ export async function listCandidateInterfaces(): Promise<CandidateInterface[]> {
   return interfaces
     .map((info) => ({
       info,
-      brands: [...new Set(candidatesForVendorId(info.vendorId).map((candidate) => candidate.brand))],
+      brands: [...new Set(candidatesForVendorId(info.vendorId, info.productId).map((candidate) => candidate.brand))],
     }))
     .filter((candidate) => candidate.brands.length > 0);
 }
@@ -83,7 +83,7 @@ export async function listCandidateInterfaces(): Promise<CandidateInterface[]> {
  */
 export async function connectToInterface(info: HidInterfaceInfo): Promise<ConnectedDevice> {
   const attempts: string[] = [];
-  for (const candidate of candidatesForVendorId(info.vendorId)) {
+  for (const candidate of candidatesForVendorId(info.vendorId, info.productId)) {
     const device = new TauriHidDevice(info);
     const client = new candidate.Client(device);
     try {

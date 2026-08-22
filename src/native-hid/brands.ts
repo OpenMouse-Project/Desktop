@@ -57,6 +57,21 @@ export interface SupportedClient {
 export interface DriverCandidate {
   name: string;
   Client: new (device: HIDDevice) => SupportedClient;
+  /**
+   * Product ids this candidate must NOT be tried against, even though its
+   * vendor id matches. `isSupported()` on every one of these classes mixes
+   * collection-based checks (which TauriHidDevice can never satisfy — see
+   * this file's own docs) with plain property checks like this one, which
+   * have nothing to do with collections and are worth keeping. Skipping
+   * `isSupported()` entirely threw this away too — e.g. EggWeHidClient's
+   * own isSupported() correctly excludes Endgame Gear's OP1-8K product ids
+   * (they speak EggOp1HidClient's protocol instead), but bypassing it let
+   * EggWeHidClient claim and misidentify an OP1-8K mouse as "OP1we" when
+   * EggOp1HidClient's own exchange failed for an unrelated reason. This
+   * list is that same exclusion, reproduced by hand since the source sets
+   * aren't exported.
+   */
+  excludeProductIds?: number[];
 }
 
 export interface BrandEntry {
@@ -70,9 +85,14 @@ export interface BrandEntry {
 // mouse-protocol calls it externally, but every class here does implement
 // it — apply.mjs (plain JS, no compile-time privacy) already calls it this
 // same way at runtime. The cast just tells TS to trust that, once, here.
-const client = (name: string, Client: new (device: HIDDevice) => unknown): DriverCandidate => ({
+const client = (
+  name: string,
+  Client: new (device: HIDDevice) => unknown,
+  excludeProductIds?: number[],
+): DriverCandidate => ({
   name,
   Client: Client as new (device: HIDDevice) => SupportedClient,
+  excludeProductIds,
 });
 
 export const BRAND_DRIVERS: BrandEntry[] = [
@@ -88,7 +108,13 @@ export const BRAND_DRIVERS: BrandEntry[] = [
   // group into one synthetic device. So it belongs here.
   { brand: "Endgame Gear", vendorIds: [0x3367], candidates: [
     client("EggOp1HidClient", EggOp1HidClient),
-    client("EggWeHidClient", EggWeHidClient),
+    // Excludes the OP1-8K product ids EggWeHidClient's own isSupported()
+    // also excludes (mouse-protocol/src/drivers/endgame/egg-we-hid.ts,
+    // EGG_8K_PRODUCT_IDS) — without this, an OP1-8K mouse that
+    // EggOp1HidClient fails to read gets misclaimed and misidentified as
+    // an "OP1we" by EggWeHidClient instead of correctly reporting no
+    // driver answered.
+    client("EggWeHidClient", EggWeHidClient, [0x1964, 0x1966, 0x1976, 0x1978, 0x1980]),
   ] },
   // Real Pulsar-vendor (0x3710) mice, including the Pulsar 4K Wireless
   // Receiver (shared vendor id 0x3554 with Teevolution/VGN — see
@@ -147,9 +173,14 @@ export interface BrandedCandidate extends DriverCandidate {
   brand: string;
 }
 
-/** Every candidate whose vendor id list includes `vendorId`, in registry order. */
-export function candidatesForVendorId(vendorId: number): BrandedCandidate[] {
+/**
+ * Every candidate whose vendor id list includes `vendorId`, in registry
+ * order, excluding any candidate that has explicitly ruled out this
+ * `productId` (see `DriverCandidate.excludeProductIds`).
+ */
+export function candidatesForVendorId(vendorId: number, productId: number): BrandedCandidate[] {
   return BRAND_DRIVERS
     .filter((entry) => entry.vendorIds.includes(vendorId))
-    .flatMap((entry) => entry.candidates.map((candidate) => ({ ...candidate, brand: entry.brand })));
+    .flatMap((entry) => entry.candidates.map((candidate) => ({ ...candidate, brand: entry.brand })))
+    .filter((candidate) => !candidate.excludeProductIds?.includes(productId));
 }
