@@ -54,11 +54,52 @@ button:focus-visible {
 /* ---------- shared bits ---------- */
 
 .brand-mark {
-  display: inline-grid;
-  place-items: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  font-size: 1.1rem;
+  display: block;
+  height: 1.1rem;
+  width: auto;
+}
+
+/* ---------- custom titlebar ---------- */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  height: 30px;
+  flex-shrink: 0;
+  background: var(--sidebar);
+  border-bottom: 1px solid var(--line);
+}
+
+.titlebar-drag {
+  flex: 1;
+  height: 100%;
+}
+
+.titlebar-controls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.titlebar-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--faint);
+}
+
+.titlebar-controls button:hover {
+  background: var(--hover);
+  color: var(--bright);
+}
+
+.titlebar-controls button.titlebar-close:hover {
+  background: #c0433d;
+  color: #fff;
 }
 
 .brand-name {
@@ -150,10 +191,19 @@ button:focus-visible {
 
 /* ---------- Full Desktop layout ---------- */
 
-.full-desktop-view {
+.full-desktop-shell {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   width: 100vw;
+  overflow: hidden;
+}
+
+.full-desktop-view {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   overflow: hidden;
 }
 
@@ -310,6 +360,100 @@ button:focus-visible {
   line-height: 1.5;
 }
 
+.rescan-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--line);
+  background: var(--control);
+  color: var(--dim);
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+
+.rescan-button:hover {
+  background: var(--hover);
+  color: var(--bright);
+}
+
+.rescan-button-standalone {
+  margin-top: 1.25rem;
+}
+
+.spin {
+  animation: spin 1.2s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.device-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 1.5rem;
+  margin-top: 2rem;
+}
+
+.device-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.device-card-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--bright);
+}
+
+.device-card-brand {
+  margin: 0.1rem 0 0;
+  font-size: 0.8rem;
+  color: var(--faint);
+}
+
+.device-card-header .rescan-button {
+  margin-left: auto;
+  padding: 0.5rem;
+}
+
+.device-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+.device-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: var(--raised);
+}
+
+.device-stat-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.device-stat-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--bright);
+}
+
 .setting-row {
   display: flex;
   align-items: center;
@@ -348,15 +492,36 @@ button:focus-visible {
   height: 100vh;
   width: 100vw;
   background: var(--ink);
-  padding: 0.9rem;
-  gap: 0.75rem;
+  overflow: hidden;
 }
 
 .bridge-header {
   display: flex;
   align-items: center;
+  padding: 0.9rem 0.9rem 0;
   gap: 0.5rem;
 }
+
+.bridge-status,
+.bridge-list,
+.bridge-settings {
+  margin: 0 0.9rem;
+}
+
+.bridge-status {
+  margin-top: 0.75rem;
+}
+
+.bridge-list {
+  margin-top: 0.4rem;
+  margin-bottom: 0.9rem;
+}
+
+.bridge-settings {
+  margin-top: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
 
 .bridge-settings-button {
   margin-left: auto;

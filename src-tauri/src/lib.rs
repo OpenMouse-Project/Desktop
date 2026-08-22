@@ -4,6 +4,9 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{LogicalSize, Manager, Size, State, WebviewWindow, WindowEvent};
 
+mod hid;
+use hid::HidRegistry;
+
 /// The two toggable app modes.
 ///
 /// Bridge Mode: minimal tray-resident companion (game detection, battery
@@ -67,7 +70,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(ModeState(Mutex::new(AppMode::FullDesktop)))
-        .invoke_handler(tauri::generate_handler![get_mode, set_mode])
+        .manage(HidRegistry::default())
+        .invoke_handler(tauri::generate_handler![
+            get_mode,
+            set_mode,
+            hid::hid_list_interfaces,
+            hid::hid_open,
+            hid::hid_close,
+            hid::hid_send_report,
+            hid::hid_send_feature_report,
+            hid::hid_get_feature_report,
+        ])
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Show OpenMouse", true, None::<&str>)?;
             let separator = PredefinedMenuItem::separator(app)?;

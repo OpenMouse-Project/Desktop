@@ -1,6 +1,8 @@
 import { useState } from "preact/hooks";
 import { Settings, X } from "lucide-preact";
+import { TitleBar } from "../components/TitleBar";
 import { SettingsPage } from "../pages/SettingsPage";
+import logo from "../assets/logo.png";
 
 type AppMode = "bridge" | "full-desktop";
 type Page = "status" | "settings";
@@ -15,10 +17,10 @@ export function BridgeView({ mode, onModeChange }: Props) {
 
   return (
     <div class="bridge-view">
+      <TitleBar showMaximize={false} />
+
       <header class="bridge-header">
-        <span class="brand-mark" aria-hidden="true">
-          Ʃ
-        </span>
+        <img class="brand-mark" src={logo} alt="" width={12} height={18} />
         <span class="brand-name">OpenMouse Bridge</span>
         <button
           class="bridge-settings-button"

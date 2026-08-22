@@ -1,10 +1,10 @@
+import logo from "../assets/logo.png";
+
 export function Sidebar() {
   return (
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <span class="brand-mark" aria-hidden="true">
-          Ʃ
-        </span>
+        <img class="brand-mark" src={logo} alt="" width={14} height={20} />
         <span class="brand-name">OpenMouse</span>
       </div>
 

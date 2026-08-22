@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "openmouse-desktop",
+  "productName": "OpenMouse Desktop",
   "version": "0.1.0",
   "identifier": "com.snekxs.openmouse-desktop",
   "build": {
@@ -12,9 +12,10 @@
   "app": {
     "windows": [
       {
-        "title": "openmouse-desktop",
+        "title": "OpenMouse Desktop",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "decorations": false
       }
     ],
     "security": {
