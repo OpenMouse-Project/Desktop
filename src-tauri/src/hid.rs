@@ -29,35 +29,30 @@
 //! but that's a rare edge case, and it's stable, which interface_number is
 //! not on this platform.
 //!
-//! **Never opened, at all**: the HID usage page/usage pair a mouse's actual
-//! pointer-motion collection and a keyboard's actual keystroke collection
-//! use (Generic Desktop page 0x01, usage 0x02 "Mouse" / usage 0x06
-//! "Keyboard"). This was tried without exclusion once, after macOS's Input
-//! Monitoring permission had been granted to the dev binary, and it froze
-//! both the physical mouse's cursor AND the app itself — opening that
-//! specific collection via raw hidapi access competes with the OS's own
-//! live consumption of it for actual cursor movement/keystroke delivery,
-//! not just its config channel. `has_excluded_usage()` below filters those
-//! out at both list and open time, unconditionally, regardless of which
-//! brand's driver is asking. The real, accepted cost: Razer's driver
-//! classes (`RazerHidClient`, `RazerViperHidClient`,
-//! `RazerViperMiniHidClient`, `RazerCobraHidClient`) all key their protocol
-//! on exactly usage page 0x01/usage 0x02 — see their own
-//! `isSupported()` — so Razer mice are not reachable through this bridge.
-//! `PulsarProHidClient` also matches usage page 1, but usage 0 ("Undefined")
-//! rather than 2 — not a live input collection, so it stays allowed.
+//! ## The actual cause of the input-freeze bug (found via the hidapi crate's
+//! own doc comment on `HidApi::set_open_exclusive`, after several wrong
+//! guesses — see git history on this file for the discarded theories):
+//! **on macOS, hidapi opens every device in *exclusive* mode by default.**
+//! That seizes the device from the OS's own HID client, which is exactly
+//! why any real mouse/keyboard went unresponsive the moment this code
+//! opened it, regardless of which collection, how long it stayed open, or
+//! whether the `HidApi` instance was shared or freshly created each call —
+//! none of those things actually mattered; every one of them still opened
+//! in exclusive mode. `with_hid_api()` below calls
+//! `api.set_open_exclusive(false)` once, immediately after creating the
+//! shared instance, so every subsequent `open_path()` opens non-exclusively
+//! and coexists with the OS's own handling of the device.
+//!
+//! The usage-page exclusion just below (never touching a mouse's pointer
+//! collection or a keyboard's keystroke collection) stays in place as
+//! defense in depth even though it wasn't the actual fix — there is still
+//! no reason to open those collections, and Razer's driver classes are the
+//! only ones that need to (see `is_live_input_collection`).
 //!
 //! A single `HidApi` instance is kept alive for the app's whole lifetime
-//! (`HidApiHandle` below) and refreshed rather than recreated on every call.
-//! Repeatedly constructing throwaway `HidApi::new()` instances — one per
-//! command — was tried first and caused a real, reproducible regression:
-//! scanning would leave a currently-plugged-in mouse's own cursor input
-//! dead until the app quit, on hardware whose config protocol legitimately
-//! shares a HID collection with the mouse's own input reports (e.g. Razer —
-//! see `RazerHidClient.isSupported()`, which matches usage page 0x01/usage
-//! 0x02, literally the standard mouse collection). Recreating the
-//! underlying HID manager on every scan call repeatedly re-matched/attached
-//! to that collection; one shared, refreshed instance does not.
+//! (`HidApiHandle` below) and refreshed rather than recreated on every
+//! call — simpler and cheaper than a fresh instance per call, and (now that
+//! exclusive mode is off) has no bearing on the freeze either way.
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -129,7 +124,8 @@ fn is_live_input_collection(usage_page: u16, usage: u16) -> bool {
 
 /// Runs `f` against the shared `HidApi`, initializing it on first use and
 /// refreshing its device list (cheap — no manager teardown/recreation) on
-/// every later call.
+/// every later call. Non-exclusive open is set once, right after creation —
+/// see the module docs above for why this is the actual freeze fix.
 fn with_hid_api<T>(
     handle: &HidApiHandle,
     f: impl FnOnce(&mut HidApi) -> Result<T, String>,
@@ -140,7 +136,9 @@ fn with_hid_api<T>(
             api.refresh_devices().map_err(|error| error.to_string())?;
         }
         None => {
-            *guard = Some(HidApi::new().map_err(|error| error.to_string())?);
+            let api = HidApi::new().map_err(|error| error.to_string())?;
+            api.set_open_exclusive(false);
+            *guard = Some(api);
         }
     }
     f(guard.as_mut().expect("just initialized above"))
@@ -197,6 +195,7 @@ pub fn hid_list_interfaces(
 #[tauri::command]
 pub fn hid_open(
     app: tauri::AppHandle,
+    api_handle: tauri::State<HidApiHandle>,
     registry: tauri::State<HidRegistry>,
     vendor_id: u16,
     product_id: u16,
@@ -206,50 +205,41 @@ pub fn hid_open(
         return Ok(());
     }
 
-    // Deliberately NOT the shared HidApiHandle used for listing: real-
-    // hardware testing showed a lasting input freeze that persisted even
-    // after the individual HidDevice was closed immediately post-read, and
-    // was fixed only by killing the whole process — never by closing our
-    // handle. That points at the long-lived, never-torn-down HidApi/
-    // IOHIDManager itself staying attached to whatever it has ever opened,
-    // not at the individual device handle. A fresh HidApi scoped to just
-    // this call, dropped at the end of this function, tests that theory:
-    // if it turns out not to be the actual cause either, revert this to
-    // the shared handle rather than stacking more one-off guesses.
-    let api = HidApi::new().map_err(|error| error.to_string())?;
-    let paths: Vec<_> = api
-        .device_list()
-        .filter(|info| {
-            info.vendor_id() == vendor_id
-                && info.product_id() == product_id
-                && !is_live_input_collection(info.usage_page(), info.usage())
-        })
-        .map(|info| info.path().to_owned())
-        .collect();
-    if paths.is_empty() {
-        return Err("No matching HID interface is currently connected.".into());
-    }
-    // Best-effort per path: a device with several top-level collections
-    // can have some open fine and others rejected for reasons that have
-    // nothing to do with the collection this brand's driver actually
-    // needs (a boot mouse/keyboard collection gated by macOS's Input
-    // Monitoring permission, for instance, sitting alongside the vendor
-    // collection a driver here actually talks to). Failing the whole
-    // group over one inaccessible split would block drivers that never
-    // needed that split in the first place. Only error out if literally
-    // none of them opened.
-    let mut devices = Vec::new();
-    let mut last_error = None;
-    for path in paths {
-        match api.open_path(&path) {
-            Ok(device) => devices.push(device),
-            Err(error) => last_error = Some(error.to_string()),
+    let devices = with_hid_api(&api_handle, |api| {
+        let paths: Vec<_> = api
+            .device_list()
+            .filter(|info| {
+                info.vendor_id() == vendor_id
+                    && info.product_id() == product_id
+                    && !is_live_input_collection(info.usage_page(), info.usage())
+            })
+            .map(|info| info.path().to_owned())
+            .collect();
+        if paths.is_empty() {
+            return Err("No matching HID interface is currently connected.".into());
         }
-    }
-    if devices.is_empty() {
-        return Err(last_error.unwrap_or_else(|| "No HID interface could be opened.".into()));
-    }
-    drop(api);
+        // Best-effort per path: a device with several top-level collections
+        // can have some open fine and others rejected for reasons that have
+        // nothing to do with the collection this brand's driver actually
+        // needs (a boot mouse/keyboard collection gated by macOS's Input
+        // Monitoring permission, for instance, sitting alongside the vendor
+        // collection a driver here actually talks to). Failing the whole
+        // group over one inaccessible split would block drivers that never
+        // needed that split in the first place. Only error out if literally
+        // none of them opened.
+        let mut opened = Vec::new();
+        let mut last_error = None;
+        for path in paths {
+            match api.open_path(&path) {
+                Ok(device) => opened.push(device),
+                Err(error) => last_error = Some(error.to_string()),
+            }
+        }
+        if opened.is_empty() {
+            return Err(last_error.unwrap_or_else(|| "No HID interface could be opened.".into()));
+        }
+        Ok(opened)
+    })?;
 
     let key = interface_key(vendor_id, product_id);
     let mut splits = Vec::new();
