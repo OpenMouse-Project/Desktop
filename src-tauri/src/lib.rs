@@ -2,14 +2,16 @@ use std::sync::Mutex;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Manager, State, WindowEvent};
+use tauri::{LogicalSize, Manager, Size, State, WebviewWindow, WindowEvent};
 
 /// The two toggable app modes.
 ///
 /// Bridge Mode: minimal tray-resident companion (game detection, battery
-/// alerts, native HID) — closing the window hides it to the tray.
+/// alerts, native HID) — closing the window hides it to the tray, and the
+/// window itself is small (a tray-popover, not a full app window).
 /// Full Desktop Mode: the full device-configuration UI — closing the
-/// window quits the app like a normal desktop app.
+/// window quits the app like a normal desktop app, and the window fills
+/// 75% of the primary display.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum AppMode {
@@ -17,7 +19,36 @@ enum AppMode {
     FullDesktop,
 }
 
+/// Fixed logical size for the Bridge Mode popover window.
+const BRIDGE_WINDOW_SIZE: (f64, f64) = (320.0, 420.0);
+
+/// Fraction of the primary display's work area Full Desktop Mode's window
+/// should occupy.
+const FULL_DESKTOP_SCREEN_FRACTION: f64 = 0.75;
+
 struct ModeState(Mutex<AppMode>);
+
+fn resize_for_mode(window: &WebviewWindow, mode: AppMode) {
+    match mode {
+        AppMode::Bridge => {
+            let _ = window.set_size(Size::Logical(LogicalSize::new(
+                BRIDGE_WINDOW_SIZE.0,
+                BRIDGE_WINDOW_SIZE.1,
+            )));
+        }
+        AppMode::FullDesktop => {
+            if let Ok(Some(monitor)) = window.primary_monitor() {
+                let scale = monitor.scale_factor();
+                let logical = monitor.size().to_logical::<f64>(scale);
+                let _ = window.set_size(Size::Logical(LogicalSize::new(
+                    logical.width * FULL_DESKTOP_SCREEN_FRACTION,
+                    logical.height * FULL_DESKTOP_SCREEN_FRACTION,
+                )));
+            }
+        }
+    }
+    let _ = window.center();
+}
 
 #[tauri::command]
 fn get_mode(state: State<ModeState>) -> AppMode {
@@ -25,8 +56,9 @@ fn get_mode(state: State<ModeState>) -> AppMode {
 }
 
 #[tauri::command]
-fn set_mode(mode: AppMode, state: State<ModeState>) -> AppMode {
+fn set_mode(mode: AppMode, window: WebviewWindow, state: State<ModeState>) -> AppMode {
     *state.0.lock().unwrap() = mode;
+    resize_for_mode(&window, mode);
     mode
 }
 
@@ -78,6 +110,14 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // Size the window to match the initial mode (Full Desktop by
+            // default — see ModeState above).
+            if let Some(window) = app.get_webview_window("main") {
+                let state = app.state::<ModeState>();
+                let mode = *state.0.lock().unwrap();
+                resize_for_mode(&window, mode);
+            }
 
             Ok(())
         })
