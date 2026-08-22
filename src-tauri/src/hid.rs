@@ -201,7 +201,9 @@ pub fn hid_open(
     product_id: u16,
 ) -> Result<(), String> {
     let group_key = (vendor_id, product_id);
+    eprintln!("[hid] hid_open start {vendor_id:04x}:{product_id:04x}");
     if registry.0.lock().unwrap().contains_key(&group_key) {
+        eprintln!("[hid] hid_open: already open, returning");
         return Ok(());
     }
 
@@ -238,6 +240,7 @@ pub fn hid_open(
         if opened.is_empty() {
             return Err(last_error.unwrap_or_else(|| "No HID interface could be opened.".into()));
         }
+        eprintln!("[hid] hid_open: opened {} split(s)", opened.len());
         Ok(opened)
     })?;
 
@@ -255,6 +258,7 @@ pub fn hid_open(
     }
 
     registry.0.lock().unwrap().insert(group_key, OpenGroup { splits, readers });
+    eprintln!("[hid] hid_open: done, registered group");
     Ok(())
 }
 
@@ -288,15 +292,19 @@ fn spawn_reader(app: tauri::AppHandle, key: String, split: Arc<OpenSplit>) -> Jo
                     // own payload content, not strictly by report id.
                     let report_id = buffer[0];
                     let data = buffer[1..length].to_vec();
+                    eprintln!(
+                        "[hid] reader {key}: got {length} bytes, reportId=0x{report_id:02x} data={data:02x?}"
+                    );
                     let _ = app.emit(
                         "hid-input-report",
                         HidInputReportPayload { key: key.clone(), report_id, data },
                     );
                 }
-                Err(_) => {
+                Err(error) => {
                     // A transient read error (e.g. device unplugged) — the
                     // stop flag (set by hid_close) is what ends this loop
                     // deliberately; anything else just backs off briefly.
+                    eprintln!("[hid] reader {key}: read_timeout error: {error}");
                     thread::sleep(Duration::from_millis(50));
                 }
             }
@@ -335,12 +343,15 @@ pub fn hid_send_report(
     report_id: u8,
     data: Vec<u8>,
 ) -> Result<(), String> {
-    with_open_group(&registry, vendor_id, product_id, |splits| {
+    eprintln!("[hid] hid_send_report {vendor_id:04x}:{product_id:04x} reportId=0x{report_id:02x} len={}", data.len());
+    let result = with_open_group(&registry, vendor_id, product_id, |splits| {
         let mut frame = Vec::with_capacity(data.len() + 1);
         frame.push(report_id);
         frame.extend_from_slice(&data);
         try_each(splits, |device| device.write(&frame).map(|_| ()))
-    })
+    });
+    eprintln!("[hid] hid_send_report done: {result:?}");
+    result
 }
 
 #[tauri::command]
@@ -351,12 +362,15 @@ pub fn hid_send_feature_report(
     report_id: u8,
     data: Vec<u8>,
 ) -> Result<(), String> {
-    with_open_group(&registry, vendor_id, product_id, |splits| {
+    eprintln!("[hid] hid_send_feature_report {vendor_id:04x}:{product_id:04x} reportId=0x{report_id:02x} len={}", data.len());
+    let result = with_open_group(&registry, vendor_id, product_id, |splits| {
         let mut frame = Vec::with_capacity(data.len() + 1);
         frame.push(report_id);
         frame.extend_from_slice(&data);
         try_each(splits, |device| device.send_feature_report(&frame))
-    })
+    });
+    eprintln!("[hid] hid_send_feature_report done: {result:?}");
+    result
 }
 
 #[tauri::command]
@@ -367,7 +381,8 @@ pub fn hid_get_feature_report(
     report_id: u8,
     length: usize,
 ) -> Result<Vec<u8>, String> {
-    with_open_group(&registry, vendor_id, product_id, |splits| {
+    eprintln!("[hid] hid_get_feature_report {vendor_id:04x}:{product_id:04x} reportId=0x{report_id:02x} length={length}");
+    let result = with_open_group(&registry, vendor_id, product_id, |splits| {
         let mut result: Option<Vec<u8>> = None;
         let outcome = try_each(splits, |device| {
             let mut buffer = vec![0u8; length + 1];
@@ -377,7 +392,9 @@ pub fn hid_get_feature_report(
             Ok(())
         });
         outcome.and(result.ok_or_else(|| "no split returned data".to_string()))
-    })
+    });
+    eprintln!("[hid] hid_get_feature_report done: {result:?}");
+    result
 }
 
 /// Runs `operation` against the open splits for a group, trying every split
@@ -401,9 +418,13 @@ fn try_each(
     mut operation: impl FnMut(&hidapi::HidDevice) -> hidapi::HidResult<()>,
 ) -> Result<(), String> {
     let mut last_error = None;
-    for split in splits {
+    for (index, split) in splits.iter().enumerate() {
+        eprintln!("[hid] try_each: split {index}/{} waiting for lock…", splits.len());
         let device = split.device.lock().unwrap();
-        match operation(&device) {
+        eprintln!("[hid] try_each: split {index} got lock, calling operation…");
+        let outcome = operation(&device);
+        eprintln!("[hid] try_each: split {index} operation returned: {outcome:?}");
+        match outcome {
             Ok(()) => return Ok(()),
             Err(error) => last_error = Some(error.to_string()),
         }
