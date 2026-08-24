@@ -19,18 +19,23 @@ import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import { allKnownVendorIds, candidatesForVendorId } from "./brands";
 import { listHidInterfaces, TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
 
-// Generous: Logitech's HID++ driver alone can legitimately take several
-// seconds per candidate. `resolveDeviceIndex()` probes every receiver
-// pairing slot in turn (a Bolt/Unifying receiver can report several paired
-// devices), and each slot's own exchange timeout
-// (`REQUEST_TIMEOUT_MS`/`BOLT_INDEX_PROBE_TIMEOUT_MS` in
-// mouse-protocol/src/drivers/logitech/hidpp.ts) is 6000ms on its own — a
-// receiver with a few empty/foreign slots can burn through several of those
-// before reaching the right one. A shorter probe timeout here (3000ms was
-// tried first) makes `readStatus()` get cut off mid-probe and reads as "no
-// device", not as a real rejection — Logitech mice went undetected because
-// of this, not because the driver itself failed.
-const PROBE_TIMEOUT_MS = 8000;
+// Generous, and specifically sized for the worst real case: a non-Bolt
+// (Unifying/Lightspeed) Logitech receiver. `resolveDeviceIndex()`
+// (mouse-protocol/src/drivers/logitech/hidpp.ts) probes
+// `hidppDeviceIndexCandidates()` in turn — for a known receiver that's 7
+// candidates (pairing slots 0x01-0x06, then the direct index) — and on a
+// non-Bolt receiver each one that doesn't answer burns its own full
+// `REQUEST_TIMEOUT_MS` (6000ms) before moving on, not the much shorter
+// `BOLT_INDEX_PROBE_TIMEOUT_MS` (800ms) Bolt gets. A receiver whose paired
+// mouse sits on a late slot — or is simply out of range — can legitimately
+// need 7 * 6000ms = 42000ms before `resolveDeviceIndex()` gives up.
+// 8000ms (and 3000ms before that) was tried first and cuts `readStatus()`
+// off mid-probe on exactly this hardware: confirmed live against a real
+// Lightspeed USB receiver, which timed out here well before its own
+// internal probe could reach the slot the mouse was actually on. That reads
+// as "no device", not as a real rejection — Logitech mice went undetected
+// because of this budget, not because the driver itself failed.
+const PROBE_TIMEOUT_MS = 45000;
 
 export interface CandidateInterface {
   info: HidInterfaceInfo;
