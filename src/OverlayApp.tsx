@@ -82,8 +82,8 @@ export function OverlayApp() {
 
   return (
     <div class={`overlay-toast overlay-toast-${toast.kind}`}>
-      <span class="overlay-toast-title">{toast.title}</span>
-      <span class="overlay-toast-body">{toast.body}</span>
+      <span class="overlay-toast-dot" aria-hidden="true" />
+      <span class="overlay-toast-text">{toast.text}</span>
     </div>
   );
 }

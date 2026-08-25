@@ -1338,42 +1338,55 @@ button:focus-visible {
 /* ---------- Overlay toast window (src/OverlayApp.tsx) ----------
    Fills its own small, transparent, always-on-top window — sized/moved to
    match the user's saved corner/size (lib/overlay-settings.ts) before
-   every show, so there's no fixed layout to fight; a small margin leaves
-   the box-shadow room to render instead of getting clipped at the window's
-   own edge. */
+   every show. `html`/`body` here get `overflow: hidden` (harmless for the
+   main window too, which already manages its own internal scroll regions
+   explicitly) — CONFIRMED the fix for a real bug: a webview's outer
+   document scrolls by default, so even a couple of stray pixels of
+   overflow from the toast's own box-shadow/margin showed up as a visible
+   native scrollbar on this borderless window. A single truncated line (not
+   a title+body pair) is what actually keeps it minimal AND keeps that
+   overflow from happening in the first place, at every size preset
+   including "Small". */
+
+html,
+body {
+  overflow: hidden;
+}
 
 .overlay-toast {
   box-sizing: border-box;
-  margin: 6px;
-  width: calc(100% - 12px);
-  height: calc(100% - 12px);
+  margin: 5px;
+  width: calc(100% - 10px);
+  height: calc(100% - 10px);
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 0.3rem;
-  padding: 0.85rem 1.05rem;
-  border-radius: 10px;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.85rem;
+  border-radius: 8px;
   border: 1px solid var(--line-strong);
-  border-left-width: 3px;
   background: var(--raised);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
   animation: toast-in 0.18s ease-out;
 }
 
-.overlay-toast-success { border-left-color: var(--success); }
-.overlay-toast-error { border-left-color: var(--warning); }
-.overlay-toast-info { border-left-color: var(--muted); }
-
-.overlay-toast-title {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--bright);
+.overlay-toast-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
 }
 
-.overlay-toast-body {
-  font-size: 0.78rem;
-  color: var(--dim);
-  line-height: 1.4;
+.overlay-toast-success .overlay-toast-dot { background: var(--success); }
+.overlay-toast-error .overlay-toast-dot { background: var(--warning); }
+
+.overlay-toast-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: var(--bright);
 }
 
 .overlay-settings-controls {
@@ -1387,6 +1400,34 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+}
+
+.overlay-corner-picker {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.overlay-corner-picker button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  background: var(--control);
+  color: var(--dim);
+  border-radius: 8px;
+}
+
+.overlay-corner-picker button:hover {
+  background: var(--hover);
+  color: var(--bright);
+}
+
+.overlay-corner-picker button.active {
+  border-color: var(--line-strong);
+  background: var(--raised);
+  color: var(--bright);
 }
 
 .setting-row {

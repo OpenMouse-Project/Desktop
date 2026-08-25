@@ -119,11 +119,13 @@ export function useGameWatcher(connection: MouseConnection) {
     }
 
     // Fires both notification surfaces together rather than duplicating
-    // the pair at every call site below — see the module docs on why both
-    // exist.
-    function notify(toastText: string, overlayTitle: string, overlayBody: string, kind: "success" | "error" | "info") {
-      showToast(toastText, kind);
-      void showOverlayToast({ title: overlayTitle, body: overlayBody, kind });
+    // the call at every site below — see the module docs on why both
+    // exist. Same text for both: the overlay toast is a single truncated
+    // line (OverlayToastPayload's own docs), so there's no separate
+    // title/body split to make here either.
+    function notify(text: string, kind: "success" | "error" | "info") {
+      showToast(text, kind);
+      void showOverlayToast({ text, kind });
     }
 
     async function applyOnLaunch(game: Game) {
@@ -153,15 +155,10 @@ export function useGameWatcher(connection: MouseConnection) {
         // something that never actually happened.
         activeOverrideRef.current = { gameId: game.id, gameName: game.name, restore };
         setActiveOverride({ gameId: game.id, gameName: game.name });
-        notify(
-          `Applied "${game.name}" profile — ${describeProfile(profile)}.`,
-          `${game.name} profile applied`,
-          describeProfile(profile),
-          "success",
-        );
+        notify(`Applied "${game.name}" profile — ${describeProfile(profile)}.`, "success");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        notify(`Couldn't apply "${game.name}" profile: ${message}`, `Couldn't apply ${game.name} profile`, message, "error");
+        notify(`Couldn't apply "${game.name}" profile: ${message}`, "error");
       }
     }
 
@@ -180,15 +177,10 @@ export function useGameWatcher(connection: MouseConnection) {
 
       try {
         await applyGameProfile(connectedInfo, restoreProfile, patchStatus);
-        notify(
-          `${game.name} closed — restored your default ${describeProfile(restoreProfile)}.`,
-          `${game.name} closed`,
-          `Restored your default ${describeProfile(restoreProfile)}`,
-          "info",
-        );
+        notify(`${game.name} closed — restored your default ${describeProfile(restoreProfile)}.`, "info");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        notify(`Couldn't restore your default settings: ${message}`, "Couldn't restore your defaults", message, "error");
+        notify(`Couldn't restore your default settings: ${message}`, "error");
       }
     }
 

@@ -14,9 +14,11 @@ import { emitTo } from "@tauri-apps/api/event";
 
 export const OVERLAY_TOAST_EVENT = "overlay-toast";
 
+// A single line, not a title+body pair — kept deliberately minimal (a
+// small pill, not a card) so it stays legible at every size preset,
+// "Small" included, without wrapping or overflowing the window.
 export interface OverlayToastPayload {
-  title: string;
-  body: string;
+  text: string;
   kind: "success" | "error" | "info";
 }
 

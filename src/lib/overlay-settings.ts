@@ -32,11 +32,14 @@ export const SIZE_LABELS: Record<OverlaySize, string> = {
   large: "Large",
 };
 
+// A single-line pill (see OverlayToastPayload's own docs on why), so
+// "size" is mostly about width — how much text fits before it's cut off
+// with an ellipsis — not height, which barely changes between presets.
 /** Physical pixel dimensions per size preset — OverlayApp resizes the actual OS window to match. */
 export const OVERLAY_SIZE_DIMENSIONS: Record<OverlaySize, { width: number; height: number }> = {
-  small: { width: 260, height: 68 },
-  medium: { width: 340, height: 92 },
-  large: { width: 420, height: 118 },
+  small: { width: 240, height: 48 },
+  medium: { width: 320, height: 52 },
+  large: { width: 420, height: 58 },
 };
 
 /** Gap from the screen edge, in physical pixels — same for every corner/size. */

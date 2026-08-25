@@ -13,6 +13,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.7",
+    date: "2026-08-25",
+    changes: [
+      "Fixed: the game-switch overlay showed a scrollbar and could overflow its box on the \"Small\" size — it's now a single-line pill that always fits",
+      "Fixed: the overlay's position picker in Settings could wrap onto two rows — now a compact row of 4",
+      "Simplified the overlay to a minimal single-line toast instead of a title+description card",
+    ],
+  },
+  {
     version: "0.0.6",
     date: "2026-08-25",
     changes: [

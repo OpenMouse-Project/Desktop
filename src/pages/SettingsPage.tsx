@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import type { Update } from "@tauri-apps/plugin-updater";
-import { Bell, FileDown, ScrollText } from "lucide-preact";
+import { Bell, CornerDownLeft, CornerDownRight, CornerUpLeft, CornerUpRight, FileDown, ScrollText } from "lucide-preact";
 import { ModeToggle } from "../components/ModeToggle";
 import { ResourceMonitor } from "../components/ResourceMonitor";
 import { ChangelogModal } from "../components/ChangelogModal";
@@ -26,6 +26,17 @@ import type { ResourceMonitorData } from "../hooks/use-resource-monitor";
 
 type AppMode = "bridge" | "full-desktop";
 const DISCORD_RPC_PREFERENCE = "openmouse.discord-rpc.enabled";
+
+// A plain flex row, not .segmented-group (a fixed 3-column grid built for
+// 3-option pickers like Gaming Surface) — CONFIRMED the cause of a real
+// bug: reusing it here wrapped the 4th corner onto its own row regardless
+// of how narrow the buttons were.
+const CORNER_OPTIONS: { corner: OverlayCorner; Icon: typeof CornerUpLeft }[] = [
+  { corner: "top-left", Icon: CornerUpLeft },
+  { corner: "top-right", Icon: CornerUpRight },
+  { corner: "bottom-left", Icon: CornerDownLeft },
+  { corner: "bottom-right", Icon: CornerDownRight },
+];
 
 interface Props {
   mode: AppMode;
@@ -119,11 +130,7 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
   }
 
   function testOverlay() {
-    void showOverlayToast({
-      title: "Test notification",
-      body: "This is what a game-switch alert looks like.",
-      kind: "info",
-    });
+    void showOverlayToast({ text: "Test notification — this is what a game-switch alert looks like.", kind: "info" });
   }
 
   async function toggleDiscordRpc(enabled: boolean) {
@@ -271,14 +278,16 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
         <div class="overlay-settings-controls">
           <div class="overlay-settings-row">
             <span class="setting-eyebrow">Position</span>
-            <div class="segmented-group">
-              {(Object.keys(CORNER_LABELS) as OverlayCorner[]).map((corner) => (
+            <div class="overlay-corner-picker">
+              {CORNER_OPTIONS.map(({ corner, Icon }) => (
                 <button
                   key={corner}
                   class={corner === overlaySettings.corner ? "active" : ""}
+                  title={CORNER_LABELS[corner]}
+                  aria-label={CORNER_LABELS[corner]}
                   onClick={() => updateOverlaySettings({ corner })}
                 >
-                  {CORNER_LABELS[corner]}
+                  <Icon size={15} aria-hidden="true" />
                 </button>
               ))}
             </div>
