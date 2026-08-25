@@ -2,10 +2,12 @@ import { useEffect, useState } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
+import type { Update } from "@tauri-apps/plugin-updater";
 import { FileDown, ScrollText } from "lucide-preact";
 import { ModeToggle } from "../components/ModeToggle";
 import { ResourceMonitor } from "../components/ResourceMonitor";
 import { ChangelogModal } from "../components/ChangelogModal";
+import { UpdateAvailableModal } from "../components/UpdateAvailableModal";
 import { showToast } from "../lib/toast";
 import { runUpdateCheck } from "../lib/update-check";
 import { getVersion } from "@tauri-apps/api/app";
@@ -31,6 +33,8 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
   );
   const [discordError, setDiscordError] = useState("");
   const [showChangelog, setShowChangelog] = useState(false);
+  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
 
   useEffect(() => {
     void getVersion().then(setVersion);
@@ -58,6 +62,13 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
   // pill and the 30-minute background poll) rather than calling the plugin
   // directly, so a manual click here doesn't run a second, disconnected
   // check that could disagree with what the pill is showing.
+  //
+  // Only checks here — CONFIRMED a real problem, not hypothetical: this
+  // used to go straight from check() into downloadAndInstall() + relaunch()
+  // the instant it found anything, so clicking a button labeled "check"
+  // could close the app out from under the user a few seconds later with no
+  // chance to back out. Finding an update now just opens
+  // UpdateAvailableModal; installing is that modal's own explicit button.
   async function checkForUpdates() {
     setCheckingForUpdates(true);
     try {
@@ -66,14 +77,24 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
         showToast("You're up to date.", "info");
         return;
       }
-      showToast(`Downloading v${update.version}…`, "info");
-      await update.downloadAndInstall();
-      showToast("Update installed — restarting…", "success");
-      await relaunch();
+      setPendingUpdate(update);
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), "error");
     } finally {
       setCheckingForUpdates(false);
+    }
+  }
+
+  async function installPendingUpdate() {
+    if (!pendingUpdate) return;
+    setInstallingUpdate(true);
+    try {
+      await pendingUpdate.downloadAndInstall();
+      showToast("Update installed — restarting…", "success");
+      await relaunch();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "error");
+      setInstallingUpdate(false);
     }
   }
 
@@ -237,6 +258,15 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
       )}
 
       {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} />}
+
+      {pendingUpdate && (
+        <UpdateAvailableModal
+          update={pendingUpdate}
+          installing={installingUpdate}
+          onInstall={() => void installPendingUpdate()}
+          onDismiss={() => setPendingUpdate(null)}
+        />
+      )}
     </section>
   );
 }

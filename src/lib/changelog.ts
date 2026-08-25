@@ -13,6 +13,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.5",
+    date: "2026-08-25",
+    changes: [
+      "Check for Updates no longer installs automatically — it now shows what version was found and waits for you to confirm before downloading and restarting",
+    ],
+  },
+  {
     version: "0.0.4",
     date: "2026-08-25",
     changes: [

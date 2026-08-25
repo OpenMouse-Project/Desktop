@@ -232,7 +232,7 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
 
         <p class="game-profile-hint">Changes save automatically.</p>
 
-        <div class="game-profile-panel-footer">
+        <div class="modal-panel-footer">
           {hasSavedProfile && (
             <button class="rescan-button" onClick={handleClear} disabled={busy}>
               <Trash2 size={14} /> Clear
