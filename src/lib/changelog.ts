@@ -13,6 +13,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.3",
+    date: "2026-08-25",
+    changes: [
+      "Overview now shows when a game profile has taken over the mouse — a banner with the game's name, live DPI/polling rate numbers that match what's actually applied",
+      "The Performance tab locks (with an explanation) while a game profile is in control, so editing your defaults mid-game can't get silently overwritten or redefine what \"default\" means",
+    ],
+  },
+  {
     version: "0.0.2",
     date: "2026-08-25",
     changes: [

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
-import { ArrowLeft, Battery, Info, RefreshCw, SlidersHorizontal, Usb } from "lucide-preact";
+import { ArrowLeft, Battery, Gamepad2, Info, RefreshCw, SlidersHorizontal, Usb } from "lucide-preact";
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import type { MouseConnection } from "../hooks/use-mouse-connection";
+import type { ActiveGameOverride } from "../hooks/use-game-watcher";
 import { deviceImage, UNKNOWN_DEVICE_IMAGE } from "../native-hid/device-images";
 import { DevicePerformanceTab } from "../components/DevicePerformanceTab";
 
@@ -92,11 +93,13 @@ function detailRows(status: MouseStatus): DetailRow[] {
 
 interface Props {
   connection: MouseConnection;
+  /** Set while a game's profile has taken over the mouse's live settings — see use-game-watcher.ts. */
+  activeGameOverride?: ActiveGameOverride | null;
 }
 
 type DeviceTab = "information" | "performance";
 
-export function OverviewPage({ connection }: Props) {
+export function OverviewPage({ connection, activeGameOverride }: Props) {
   const {
     list,
     connected,
@@ -153,6 +156,15 @@ export function OverviewPage({ connection }: Props) {
             </button>
           </div>
 
+          {activeGameOverride && (
+            <div class="profile-override-banner">
+              <Gamepad2 size={14} aria-hidden="true" />
+              <span>
+                <strong>{activeGameOverride.gameName}</strong> profile is active — DPI and polling rate are controlled by the game. Your defaults return when it closes.
+              </span>
+            </div>
+          )}
+
           <div class="device-stat-grid">
             <div class="device-stat">
               <span class="device-stat-label">DPI</span>
@@ -206,7 +218,12 @@ export function OverviewPage({ connection }: Props) {
           )}
 
           {canControl && deviceTab === "performance" && connectedInfo && (
-            <DevicePerformanceTab info={connectedInfo} status={status} onApplied={patchStatus} />
+            <DevicePerformanceTab
+              info={connectedInfo}
+              status={status}
+              onApplied={patchStatus}
+              lockedBy={activeGameOverride?.gameName}
+            />
           )}
         </div>
       </section>

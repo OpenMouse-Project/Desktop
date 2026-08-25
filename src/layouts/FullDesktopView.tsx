@@ -47,7 +47,7 @@ export function FullDesktopView({ mode, onModeChange }: Props) {
           <Header page={page} onNavigate={setPage} connected={connection.connected} />
           <div class="full-desktop-content">
             {page === "overview" ? (
-              <OverviewPage connection={connection} />
+              <OverviewPage connection={connection} activeGameOverride={gameWatcher.activeOverride} />
             ) : page === "games" ? (
               <GamesPage connection={connection} watcher={gameWatcher} />
             ) : (

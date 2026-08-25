@@ -59,12 +59,25 @@ const POLL_INTERVAL_MS = 4000;
  */
 interface ActiveOverride {
   gameId: string;
+  gameName: string;
   restore: Pick<GameProfile, "dpi" | "dpiY" | "pollingRateHz">;
+}
+
+/** What OverviewPage needs to know: a profile is in control, and whose. */
+export interface ActiveGameOverride {
+  gameId: string;
+  gameName: string;
 }
 
 export function useGameWatcher(connection: MouseConnection) {
   const [list, setList] = useState<GamesListState>({ status: "loading" });
   const [runningProcesses, setRunningProcesses] = useState<Set<string>>(new Set());
+  // Mirrors activeOverrideRef below for rendering — OverviewPage locks the
+  // Performance tab and shows which game is in control off this. The ref
+  // stays the source of truth for the async poll logic (avoids stale
+  // closures the way every other piece of state here does); this is purely
+  // the render-triggering copy of it.
+  const [activeOverride, setActiveOverride] = useState<ActiveGameOverride | null>(null);
 
   // Refs so the poll interval below (set up once, on mount) always sees the
   // latest games list and mouse connection without needing to tear down and
@@ -112,21 +125,22 @@ export function useGameWatcher(connection: MouseConnection) {
       // matters — that's what "default" means here. A second game taking
       // over from a first (still-running) one just changes who's in
       // control, not what gets restored afterward.
-      if (!activeOverrideRef.current) {
-        activeOverrideRef.current = {
-          gameId: game.id,
-          restore: {
+      const restore = activeOverrideRef.current
+        ? activeOverrideRef.current.restore
+        : {
             dpi: profile.dpi !== undefined ? connected.status.dpi : undefined,
             dpiY: profile.dpiY !== undefined ? connected.status.dpiY : undefined,
             pollingRateHz: profile.pollingRateHz !== undefined ? connected.status.pollingRateHz : undefined,
-          },
-        };
-      } else {
-        activeOverrideRef.current.gameId = game.id;
-      }
+          };
 
       try {
         await applyGameProfile(connectedInfo, profile, patchStatus);
+        // Only actually take over — locking the Performance tab, showing
+        // the "in control" badge — once the write is confirmed to have
+        // reached the mouse. A failed apply shouldn't lock the UI for
+        // something that never actually happened.
+        activeOverrideRef.current = { gameId: game.id, gameName: game.name, restore };
+        setActiveOverride({ gameId: game.id, gameName: game.name });
         showToast(`Applied "${game.name}" profile — ${describeProfile(profile)}.`, "success");
       } catch (error) {
         showToast(`Couldn't apply "${game.name}" profile: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -137,6 +151,7 @@ export function useGameWatcher(connection: MouseConnection) {
       const active = activeOverrideRef.current;
       if (!active || active.gameId !== game.id) return;
       activeOverrideRef.current = null;
+      setActiveOverride(null);
 
       const restoreProfile: GameProfile = { ...active.restore, autoApply: false };
       if (!isProfileMeaningful(restoreProfile)) return;
@@ -189,7 +204,7 @@ export function useGameWatcher(connection: MouseConnection) {
     };
   }, []);
 
-  return { list, runningProcesses };
+  return { list, runningProcesses, activeOverride };
 }
 
 export type GameWatcher = ReturnType<typeof useGameWatcher>;

@@ -17,6 +17,8 @@ interface Props {
   status: MouseStatus;
   /** Patches the cached status with the value the device actually applied. */
   onApplied: (patch: Partial<MouseStatus>) => void;
+  /** Name of the game whose profile currently owns the mouse's live settings, if any — see use-game-watcher.ts. */
+  lockedBy?: string;
 }
 
 /**
@@ -27,8 +29,16 @@ interface Props {
  * ever in flight at a time (see the `pending` guard below) since two of this
  * tab's own controls sharing the same open device handle at once risks the
  * same cross-talk `hid.rs`'s dedup fix exists for on the read side.
+ *
+ * These controls ARE the "default" a game profile (lib/game-profiles.ts)
+ * restores to when the game closes — editing them while a profile has
+ * already taken over would just get silently overwritten again next launch
+ * and, worse, redefine what "default" even means mid-override. `lockedBy`
+ * disables every control here for exactly as long as that's true, rather
+ * than let a value someone changes here quietly stop meaning anything.
  */
-export function DevicePerformanceTab({ info, status, onApplied }: Props) {
+export function DevicePerformanceTab({ info, status, onApplied, lockedBy }: Props) {
+  const locked = lockedBy !== undefined;
   const [pending, setPending] = useState<"dpi" | "rate" | "lod" | "surface" | null>(null);
   const [dpiXInput, setDpiXInput] = useState(String(status.dpi));
   const [dpiYInput, setDpiYInput] = useState(String(status.dpiY ?? status.dpi));
@@ -107,12 +117,20 @@ export function DevicePerformanceTab({ info, status, onApplied }: Props) {
     }
   }
 
-  const busy = pending !== null;
+  // Folding `locked` into `busy` disables every control below (they all
+  // already gate on `busy`) without needing to touch each one individually.
+  const busy = pending !== null || locked;
   const isCustomDpi = !DPI_PRESETS.includes(status.dpi);
   const showSeparateAxes = status.supportsSeparateDpiAxes === true;
 
   return (
     <div class="performance-tab">
+      {locked && (
+        <p class="performance-locked-note">
+          Locked while <strong>{lockedBy}</strong> is running — this is your default, and it'll be editable again once the game closes.
+        </p>
+      )}
+
       <div class="dpi-panel">
         <div class="dpi-panel-header">
           <div class="setting-label">

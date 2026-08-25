@@ -1051,6 +1051,28 @@ button:focus-visible {
   padding: 0.5rem;
 }
 
+.profile-override-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid var(--success);
+  background: color-mix(in srgb, var(--success) 12%, var(--card));
+  color: var(--success);
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.profile-override-banner span {
+  color: var(--dim);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.profile-override-banner strong {
+  color: var(--bright);
+}
+
 .device-stat-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -1150,6 +1172,21 @@ button:focus-visible {
 
 .performance-tab {
   margin-top: 0.25rem;
+}
+
+.performance-locked-note {
+  margin: 0 0 0.9rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--success);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--success) 10%, var(--card));
+  color: var(--dim);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.performance-locked-note strong {
+  color: var(--bright);
 }
 
 .performance-dpi-control {
