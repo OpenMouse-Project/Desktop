@@ -1,24 +1,27 @@
-// User-configurable corner/size for the always-on-top game-switch toast
-// window (src/OverlayApp.tsx). Plain localStorage, matching this app's
-// other small preference stores (native-hid/device-store.ts) — and
-// specifically NOT scoped to one window: Settings (running in "main")
-// saves here, OverlayApp (running in "overlay") reads it on every show.
-// Both windows load the same origin, so localStorage is already shared
-// between them without any IPC needed.
+// User-configurable corner for the always-on-top game-switch toast window
+// (src/OverlayApp.tsx). Plain localStorage, matching this app's other
+// small preference stores (native-hid/device-store.ts) — and specifically
+// NOT scoped to one window: Settings (running in "main") saves here,
+// OverlayApp (running in "overlay") reads it on every show. Both windows
+// load the same origin, so localStorage is already shared between them
+// without any IPC needed.
+//
+// Size used to be user-configurable too (Small/Medium/Large); removed on
+// request in favor of always using what "Large" was — one less decision,
+// and the single-line pill (OverlayToastPayload's own docs) barely changed
+// height between presets anyway, so size was really only ever about width.
 
 export type OverlayCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
-export type OverlaySize = "small" | "medium" | "large";
 
 export interface OverlaySettings {
   corner: OverlayCorner;
-  size: OverlaySize;
 }
 
 const STORAGE_KEY = "openmouse:overlay-settings";
 
-const DEFAULT_SETTINGS: OverlaySettings = { corner: "bottom-right", size: "medium" };
+const DEFAULT_SETTINGS: OverlaySettings = { corner: "bottom-right" };
 
-/** Display labels for the Settings picker — also the source of truth for which corner/size values are valid. */
+/** Display labels for the Settings picker — also the source of truth for which corner values are valid. */
 export const CORNER_LABELS: Record<OverlayCorner, string> = {
   "top-left": "Top left",
   "top-right": "Top right",
@@ -26,23 +29,10 @@ export const CORNER_LABELS: Record<OverlayCorner, string> = {
   "bottom-right": "Bottom right",
 };
 
-export const SIZE_LABELS: Record<OverlaySize, string> = {
-  small: "Small",
-  medium: "Medium",
-  large: "Large",
-};
+/** Physical pixel size of the overlay window — OverlayApp resizes the actual OS window to match. */
+export const OVERLAY_SIZE = { width: 420, height: 58 };
 
-// A single-line pill (see OverlayToastPayload's own docs on why), so
-// "size" is mostly about width — how much text fits before it's cut off
-// with an ellipsis — not height, which barely changes between presets.
-/** Physical pixel dimensions per size preset — OverlayApp resizes the actual OS window to match. */
-export const OVERLAY_SIZE_DIMENSIONS: Record<OverlaySize, { width: number; height: number }> = {
-  small: { width: 240, height: 48 },
-  medium: { width: 320, height: 52 },
-  large: { width: 420, height: 58 },
-};
-
-/** Gap from the screen edge, in physical pixels — same for every corner/size. */
+/** Gap from the screen edge, in physical pixels — same for every corner. */
 export const OVERLAY_MARGIN = 24;
 
 export function getOverlaySettings(): OverlaySettings {
@@ -52,7 +42,6 @@ export function getOverlaySettings(): OverlaySettings {
     const parsed = JSON.parse(raw) as Partial<OverlaySettings>;
     return {
       corner: parsed.corner && parsed.corner in CORNER_LABELS ? parsed.corner : DEFAULT_SETTINGS.corner,
-      size: parsed.size && parsed.size in OVERLAY_SIZE_DIMENSIONS ? parsed.size : DEFAULT_SETTINGS.size,
     };
   } catch {
     // Private-browsing-style storage blocks, corrupted JSON, whatever —

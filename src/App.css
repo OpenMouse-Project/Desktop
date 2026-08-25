@@ -1417,6 +1417,9 @@ body {
   background: var(--control);
   color: var(--dim);
   border-radius: 8px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .overlay-corner-picker button:hover {

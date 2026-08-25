@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import type { Update } from "@tauri-apps/plugin-updater";
-import { Bell, CornerDownLeft, CornerDownRight, CornerUpLeft, CornerUpRight, FileDown, ScrollText } from "lucide-preact";
+import { Bell, FileDown, ScrollText } from "lucide-preact";
 import { ModeToggle } from "../components/ModeToggle";
 import { ResourceMonitor } from "../components/ResourceMonitor";
 import { ChangelogModal } from "../components/ChangelogModal";
@@ -11,15 +11,7 @@ import { UpdateAvailableModal } from "../components/UpdateAvailableModal";
 import { showToast } from "../lib/toast";
 import { runUpdateCheck } from "../lib/update-check";
 import { showOverlayToast } from "../lib/overlay-toast";
-import {
-  CORNER_LABELS,
-  SIZE_LABELS,
-  getOverlaySettings,
-  saveOverlaySettings,
-  type OverlayCorner,
-  type OverlaySettings,
-  type OverlaySize,
-} from "../lib/overlay-settings";
+import { CORNER_LABELS, getOverlaySettings, saveOverlaySettings, type OverlayCorner, type OverlaySettings } from "../lib/overlay-settings";
 import { getVersion } from "@tauri-apps/api/app";
 import type { ResourceMonitorData } from "../hooks/use-resource-monitor";
 
@@ -27,15 +19,18 @@ import type { ResourceMonitorData } from "../hooks/use-resource-monitor";
 type AppMode = "bridge" | "full-desktop";
 const DISCORD_RPC_PREFERENCE = "openmouse.discord-rpc.enabled";
 
-// A plain flex row, not .segmented-group (a fixed 3-column grid built for
-// 3-option pickers like Gaming Surface) — CONFIRMED the cause of a real
-// bug: reusing it here wrapped the 4th corner onto its own row regardless
-// of how narrow the buttons were.
-const CORNER_OPTIONS: { corner: OverlayCorner; Icon: typeof CornerUpLeft }[] = [
-  { corner: "top-left", Icon: CornerUpLeft },
-  { corner: "top-right", Icon: CornerUpRight },
-  { corner: "bottom-left", Icon: CornerDownLeft },
-  { corner: "bottom-right", Icon: CornerDownRight },
+// Short abbreviations, not the icons this had before (disliked) or the
+// full "Top left"/"Bottom right" labels (too wide to reliably fit 4 in one
+// row down in Bridge Mode's 320px popover) — the full name is still there,
+// as a tooltip. A plain flex row, not .segmented-group (a fixed 3-column
+// grid built for 3-option pickers like Gaming Surface) — CONFIRMED the
+// cause of a real bug: reusing it here wrapped the 4th corner onto its own
+// row regardless of how narrow the buttons were.
+const CORNER_OPTIONS: { corner: OverlayCorner; abbr: string }[] = [
+  { corner: "top-left", abbr: "TL" },
+  { corner: "top-right", abbr: "TR" },
+  { corner: "bottom-left", abbr: "BL" },
+  { corner: "bottom-right", abbr: "BR" },
 ];
 
 interface Props {
@@ -279,7 +274,7 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
           <div class="overlay-settings-row">
             <span class="setting-eyebrow">Position</span>
             <div class="overlay-corner-picker">
-              {CORNER_OPTIONS.map(({ corner, Icon }) => (
+              {CORNER_OPTIONS.map(({ corner, abbr }) => (
                 <button
                   key={corner}
                   class={corner === overlaySettings.corner ? "active" : ""}
@@ -287,21 +282,7 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
                   aria-label={CORNER_LABELS[corner]}
                   onClick={() => updateOverlaySettings({ corner })}
                 >
-                  <Icon size={15} aria-hidden="true" />
-                </button>
-              ))}
-            </div>
-          </div>
-          <div class="overlay-settings-row">
-            <span class="setting-eyebrow">Size</span>
-            <div class="segmented-group">
-              {(Object.keys(SIZE_LABELS) as OverlaySize[]).map((size) => (
-                <button
-                  key={size}
-                  class={size === overlaySettings.size ? "active" : ""}
-                  onClick={() => updateOverlaySettings({ size })}
-                >
-                  {SIZE_LABELS[size]}
+                  {abbr}
                 </button>
               ))}
             </div>

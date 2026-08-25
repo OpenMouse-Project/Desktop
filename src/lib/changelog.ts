@@ -13,6 +13,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.8",
+    date: "2026-08-25",
+    changes: [
+      "Fixed: the game-switch overlay could land partly under the Windows taskbar on a \"bottom\" corner — now positioned against the screen's actual usable area, not its full size",
+      "Removed the overlay's size options — it's always the size that used to be \"Large\"",
+      "Overlay position picker is text (TL/TR/BL/BR) instead of icons",
+    ],
+  },
+  {
     version: "0.0.7",
     date: "2026-08-25",
     changes: [
