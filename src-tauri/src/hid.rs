@@ -43,12 +43,6 @@
 //! shared instance, so every subsequent `open_path()` opens non-exclusively
 //! and coexists with the OS's own handling of the device.
 //!
-//! The usage-page exclusion just below (never touching a mouse's pointer
-//! collection or a keyboard's keystroke collection) stays in place as
-//! defense in depth even though it wasn't the actual fix — there is still
-//! no reason to open those collections, and Razer's driver classes are the
-//! only ones that need to (see `is_live_input_collection`).
-//!
 //! **Known gap, confirmed on real hardware, not yet solved:** at least one
 //! device (Endgame Gear's OP1-8K) answers `GetFeatureReport` with an I/O
 //! timeout when opened non-exclusively — its control-transfer protocol
@@ -58,23 +52,199 @@
 //! a mitigating factor. Non-exclusive stays the default because freezing a
 //! user's real mouse/keyboard is a worse failure than a device's config
 //! protocol not answering — a device that needs exclusive access to
-//! function is presently unreachable through this bridge, same category of
-//! gap as Razer (see `brands.ts`), not a bug to "fix" by bringing exclusive
-//! mode back.
+//! function is presently unreachable through this bridge, not a bug to
+//! "fix" by bringing exclusive mode back.
 //!
 //! A single `HidApi` instance is kept alive for the app's whole lifetime
 //! (`HidApiHandle` below) and refreshed rather than recreated on every
 //! call — simpler and cheaper than a fresh instance per call, and (now that
 //! exclusive mode is off) has no bearing on the freeze either way.
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use hidapi::HidApi;
 use serde::Serialize;
 use tauri::Emitter;
+
+// ---------------------------------------------------------------------------
+// Windows sub-collection enumeration
+// ---------------------------------------------------------------------------
+//
+// hidapi on Windows returns one entry per *top-level* HID collection, but
+// composite devices (Razer mice, for instance) can place their vendor
+// protocol on a *sub*-collection that shares the same USB interface.
+// `open_path` associates the handle with the *first* top-level collection,
+// so feature reports declared on a later sub-collection are unreachable
+// through that handle — `IOCTL_HID_GET_FEATURE` returns ERROR_INVALID_FUNCTION.
+//
+// The browser's WebHID sidesteps this: the browser parses every collection's
+// report descriptor and routes reports to the correct one.  We replicate
+// that by using `SetupDi*` APIs to enumerate every device-interface path
+// the HID minidriver created (including sub-collection paths with `&colNN`
+// in the device-id), then opening them all so `try_each` can probe each one.
+// ---------------------------------------------------------------------------
+#[cfg(target_os = "windows")]
+mod windows_hid_enumerate {
+    use std::ffi::c_void;
+    use std::mem;
+    use std::ptr;
+
+    type BOOL = i32;
+    type DWORD = u32;
+    type HANDLE = *mut c_void;
+    type HDEVINFO = *mut c_void;
+    type PCWSTR = *const u16;
+
+    const FALSE: BOOL = 0;
+    const DIGCF_PRESENT: DWORD = 0x00000002;
+    const DIGCF_DEVICEINTERFACE: DWORD = 0x00000010;
+    const INVALID_HANDLE_VALUE: HANDLE = -1isize as *mut c_void;
+
+    #[repr(C)]
+    #[allow(non_snake_case)]
+    struct GUID {
+        Data1: u32,
+        Data2: u16,
+        Data3: u16,
+        Data4: [u8; 8],
+    }
+
+    // HID interface class GUID
+    static HID_GUID: GUID = GUID {
+        Data1: 0x4D1E55B2,
+        Data2: 0xF16F,
+        Data3: 0x11CF,
+        Data4: [0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30],
+    };
+
+    #[repr(C)]
+    #[allow(non_snake_case)]
+    struct SP_DEVICE_INTERFACE_DATA {
+        cbSize: DWORD,
+        InterfaceClassGuid: GUID,
+        Flags: DWORD,
+        Reserved: usize,
+    }
+
+    #[repr(C)]
+    #[allow(dead_code, non_snake_case)]
+    struct SP_DEVINFO_DATA {
+        cbSize: DWORD,
+        ClassGuid: GUID,
+        DevInst: DWORD,
+        Reserved: usize,
+    }
+
+    #[repr(C)]
+    #[allow(non_snake_case)]
+    struct SP_DEVICE_INTERFACE_DETAIL_DATA_W {
+        cbSize: DWORD,
+    }
+
+    extern "system" {
+        fn SetupDiGetClassDevsW(
+            ClassGuid: *const GUID,
+            Enumerator: PCWSTR,
+            hwndParent: *mut c_void,
+            Flags: DWORD,
+        ) -> HDEVINFO;
+        fn SetupDiEnumDeviceInterfaces(
+            DeviceInfoSet: HDEVINFO,
+            DeviceInfoData: *const SP_DEVINFO_DATA,
+            InterfaceClassGuid: *const GUID,
+            MemberIndex: DWORD,
+            DeviceInterfaceData: *mut SP_DEVICE_INTERFACE_DATA,
+        ) -> BOOL;
+        fn SetupDiGetDeviceInterfaceDetailW(
+            DeviceInfoSet: HDEVINFO,
+            DeviceInterfaceData: *const SP_DEVICE_INTERFACE_DATA,
+            DeviceInterfaceDetailData: *mut SP_DEVICE_INTERFACE_DETAIL_DATA_W,
+            DeviceInterfaceDetailDataSize: DWORD,
+            RequiredSize: *mut DWORD,
+            DeviceInfoData: *mut SP_DEVINFO_DATA,
+        ) -> BOOL;
+        fn SetupDiDestroyDeviceInfoList(DeviceInfoSet: HDEVINFO) -> BOOL;
+    }
+
+    /// Enumerate every HID device-interface path for the given `(vid, pid)`,
+    /// including sub-collection paths (`&colNN` in the device-id) that
+    /// hidapi's own enumeration may skip.
+    pub fn enumerate_paths(vid: u16, pid: u16) -> Vec<String> {
+        let mut paths = Vec::new();
+        unsafe {
+            let dev_info = SetupDiGetClassDevsW(
+                &HID_GUID,
+                ptr::null(),
+                ptr::null_mut(),
+                DIGCF_PRESENT | DIGCF_DEVICEINTERFACE,
+            );
+            if dev_info == INVALID_HANDLE_VALUE {
+                return paths;
+            }
+            let mut idx: DWORD = 0;
+            loop {
+                let mut iface: SP_DEVICE_INTERFACE_DATA = mem::zeroed();
+                iface.cbSize = mem::size_of::<SP_DEVICE_INTERFACE_DATA>() as DWORD;
+                if SetupDiEnumDeviceInterfaces(
+                    dev_info,
+                    ptr::null(),
+                    &HID_GUID,
+                    idx,
+                    &mut iface,
+                ) == FALSE
+                {
+                    break;
+                }
+                idx += 1;
+                let mut required: DWORD = 0;
+                SetupDiGetDeviceInterfaceDetailW(
+                    dev_info,
+                    &iface,
+                    ptr::null_mut(),
+                    0,
+                    &mut required,
+                    ptr::null_mut(),
+                );
+                if required == 0 {
+                    continue;
+                }
+                let mut buf: Vec<u8> = vec![0u8; required as usize];
+                let detail = buf.as_mut_ptr() as *mut SP_DEVICE_INTERFACE_DETAIL_DATA_W;
+                (*detail).cbSize = mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() as DWORD;
+                if SetupDiGetDeviceInterfaceDetailW(
+                    dev_info,
+                    &iface,
+                    detail,
+                    required,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                ) == FALSE
+                {
+                    continue;
+                }
+                let path_ptr = buf[mem::size_of::<DWORD>()..].as_ptr() as *const u16;
+                let max_chars = (buf.len() - mem::size_of::<DWORD>()) / 2;
+                let len = (0..max_chars)
+                    .position(|i| *path_ptr.add(i) == 0)
+                    .unwrap_or(max_chars);
+                let path = String::from_utf16_lossy(std::slice::from_raw_parts(path_ptr, len));
+                let lower = path.to_lowercase();
+                if lower.contains(&format!("vid_{vid:04x}"))
+                    && lower.contains(&format!("pid_{pid:04x}"))
+                {
+                    paths.push(path);
+                }
+            }
+            SetupDiDestroyDeviceInfoList(dev_info);
+        }
+        paths
+    }
+}
 
 /// How long each blocking read waits before checking the stop flag again.
 /// Short enough that `hid_close` feels immediate, long enough not to spin.
@@ -134,15 +304,16 @@ impl Default for HidApiHandle {
 #[derive(Default)]
 pub struct HidRegistry(Mutex<HashMap<(u16, u16), OpenGroup>>);
 
+/// Extra device-interface paths discovered on Windows via `SetupDi*` that
+/// hidapi's own enumeration missed (sub-collection paths with `&colNN` in
+/// the device-id).  Populated by `hid_list_interfaces`, consumed by
+/// `hid_open`.
+#[cfg(target_os = "windows")]
+static EXTRA_WINDOWS_PATHS: LazyLock<Mutex<HashMap<(u16, u16), Vec<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 fn interface_key(vendor_id: u16, product_id: u16) -> String {
     format!("{vendor_id:04x}:{product_id:04x}")
-}
-
-/// Generic Desktop (page 0x01) Mouse (usage 0x02) or Keyboard (usage 0x06) —
-/// the collection an OS actively reads for real cursor motion or keystrokes.
-/// See the module docs above for why this is never opened, unconditionally.
-fn is_live_input_collection(usage_page: u16, usage: u16) -> bool {
-    usage_page == 0x01 && (usage == 0x02 || usage == 0x06)
 }
 
 /// Runs `f` against the shared `HidApi`, initializing it on first use and
@@ -215,19 +386,66 @@ pub fn hid_list_interfaces(
             if !vendor_ids.contains(&info.vendor_id()) {
                 continue;
             }
-            if is_live_input_collection(info.usage_page(), info.usage()) {
-                continue;
-            }
+            applog!(
+                "[hid] enumerate: vid={:04x} pid={:04x} path={} usage_page={:04x} usage={:04x} product={:?}",
+                info.vendor_id(), info.product_id(),
+                info.path().to_string_lossy(),
+                info.usage_page(), info.usage(),
+                info.product_string(),
+            );
             groups
                 .entry((info.vendor_id(), info.product_id()))
                 .or_default()
                 .push(info);
         }
 
-        // A device whose only matching collection(s) were the live input
-        // one just excluded above (e.g. Razer) legitimately has nothing
-        // left here — it simply won't appear in the list, which is correct:
-        // there is nothing safe to open for it.
+        // On Windows, also enumerate device-interface paths via SetupDi*
+        // that hidapi may have skipped (sub-collection paths with &colNN
+        // in the device-id).  Record their paths so hid_open can open them.
+        #[cfg(target_os = "windows")]
+        {
+            let mut extra_paths: HashMap<(u16, u16), Vec<String>> = HashMap::new();
+            for &vid in &vendor_ids {
+                let pids: Vec<u16> = groups
+                    .keys()
+                    .filter(|(v, _)| *v == vid)
+                    .map(|(_, p)| *p)
+                    .collect();
+                for &pid in &pids {
+                    for path in windows_hid_enumerate::enumerate_paths(vid, pid) {
+                        applog!("[hid] windows enumerate: vid={vid:04x} pid={pid:04x} path={path}");
+                        extra_paths.entry((vid, pid)).or_default().push(path);
+                    }
+                }
+            }
+            // Log paths that Windows found but hidapi missed
+            for ((vid, pid), paths) in &extra_paths {
+                let existing: HashSet<String> = groups
+                    .get(&(*vid, *pid))
+                    .map(|v| {
+                        v.iter()
+                            .map(|i| i.path().to_string_lossy().into_owned())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                for path in paths {
+                    if !existing.contains(path.as_str()) {
+                        applog!(
+                            "[hid] windows extra path for {vid:04x}:{pid:04x}: {path}"
+                        );
+                    }
+                }
+            }
+            // Store extra paths in a global so hid_open can retrieve them
+            EXTRA_WINDOWS_PATHS.lock().unwrap().clear();
+            for ((vid, pid), paths) in extra_paths {
+                EXTRA_WINDOWS_PATHS
+                    .lock()
+                    .unwrap()
+                    .insert((vid, pid), paths);
+            }
+        }
+
         let mut result: Vec<HidInterface> = groups
             .into_iter()
             .map(|((vendor_id, product_id), infos)| {
@@ -273,15 +491,39 @@ pub fn hid_open(
     }
 
     let devices = with_hid_api(&api_handle, |api| {
-        let paths: Vec<_> = api
+        let mut paths: Vec<String> = api
             .device_list()
             .filter(|info| {
                 info.vendor_id() == vendor_id
                     && info.product_id() == product_id
-                    && !is_live_input_collection(info.usage_page(), info.usage())
             })
-            .map(|info| info.path().to_owned())
+            .map(|info| {
+                let p = info.path().to_string_lossy().into_owned();
+                applog!(
+                    "[hid] hid_open: hidapi path for {vendor_id:04x}:{product_id:04x}: {p} usage_page={:04x} usage={:04x}",
+                    info.usage_page(),
+                    info.usage(),
+                );
+                p
+            })
             .collect();
+
+        // On Windows, merge in any extra sub-collection paths that
+        // hidapi missed but SetupDi enumerated.
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(extra) = EXTRA_WINDOWS_PATHS.lock().unwrap().remove(&(vendor_id, product_id))
+            {
+                for path in &extra {
+                    if !paths.iter().any(|p| p == path) {
+                        applog!(
+                            "[hid] hid_open: extra windows path for {vendor_id:04x}:{product_id:04x}: {path}"
+                        );
+                        paths.push(path.clone());
+                    }
+                }
+            }
+        }
         if paths.is_empty() {
             return Err("No matching HID interface is currently connected.".into());
         }
@@ -296,10 +538,20 @@ pub fn hid_open(
         // none of them opened.
         let mut opened = Vec::new();
         let mut last_error = None;
-        for path in paths {
-            match api.open_path(&path) {
-                Ok(device) => opened.push(device),
-                Err(error) => last_error = Some(error.to_string()),
+        for path in &paths {
+            let c_path = match CString::new(path.as_str()) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            match api.open_path(&c_path) {
+                Ok(device) => {
+                    applog!("[hid] hid_open: successfully opened: {path}");
+                    opened.push(device);
+                }
+                Err(error) => {
+                    applog!("[hid] hid_open: failed to open {path}: {error}");
+                    last_error = Some(error.to_string());
+                }
             }
         }
         if opened.is_empty() {
@@ -680,7 +932,18 @@ pub async fn hid_get_feature_report(
             let mut buffer = vec![0u8; length + 1];
             buffer[0] = report_id;
             let read = device.get_feature_report(&mut buffer)?;
-            result = Some(buffer[..read].to_vec());
+            // hidapi's get_feature_report puts the report ID at buf[0] and
+            // data at buf[1..].  The return value differs by platform:
+            // - Windows: IOCTL_HID_GET_FEATURE's BytesReturned includes the
+            //   report ID (1 + data_length).
+            // - Linux/macOS: the ioctl returns data_length only.
+            // WebHID's receiveFeatureReport strips the report ID, so we must
+            // strip it here to match the browser API contract.
+            #[cfg(target_os = "windows")]
+            let data_end = read;
+            #[cfg(not(target_os = "windows"))]
+            let data_end = 1 + read;
+            result = Some(buffer[1..data_end].to_vec());
             Ok(())
         });
         outcome.and(result.ok_or_else(|| "no split returned data".to_string()))

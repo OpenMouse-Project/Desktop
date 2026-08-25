@@ -137,13 +137,9 @@ export const BRAND_DRIVERS: BrandEntry[] = [
   // Orbital) — see mouse-protocol/src/ninjutso/index.ts.
   { brand: "Ninjutso", vendorIds: [0x093a, 0x1915], candidates: [client("NinjutsoHidClient", NinjutsoHidClient)] },
   { brand: "Orbital", vendorIds: [0x1915], candidates: [client("OrbitalHidClient", OrbitalHidClient)] },
-  // Kept registered for completeness, but not actually reachable right now:
-  // every one of these classes' isSupported() keys on Generic Desktop page
-  // 0x01/usage 0x02 (or 0x0c for viper-v4-pro) — the mouse's own live
-  // pointer collection — which src-tauri/src/hid.rs now refuses to open at
-  // all (opening it caused a real cursor + app freeze during testing). No
-  // Razer interface will ever appear in the connectable list until that's
-  // solved a different way.
+  // Razer mice communicate via feature reports on the Generic Desktop Mouse
+  // collection (page 0x01, usage 0x02). Non-exclusive open (set at HidApi
+  // init) prevents the cursor-freeze that exclusive mode caused.
   { brand: "Razer", vendorIds: [0x1532], candidates: [
     client("RazerHidClient", RazerHidClient),
     client("RazerCobraHidClient", RazerCobraHidClient),

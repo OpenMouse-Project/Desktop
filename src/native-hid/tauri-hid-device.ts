@@ -114,11 +114,17 @@ export class TauriHidDevice implements HIDDevice {
   }
 
   async receiveFeatureReport(reportId: number): Promise<DataView> {
+    // WebHID returns whatever the device sends regardless of the HID
+    // descriptor.  Razer's protocol uses 90-byte feature reports that are
+    // *not* declared in the descriptor (see @openmouse/protocol's razer/codec),
+    // so the buffer must be large enough to hold the full response.  90 bytes
+    // covers every known vendor that uses undocumented feature reports; other
+    // brands' shorter reports simply return fewer bytes, which is fine.
     const bytes = await invoke<number[]>("hid_get_feature_report", {
       vendorId: this.vendorId,
       productId: this.productId,
       reportId,
-      length: 64,
+      length: 90,
     });
     return new DataView(Uint8Array.from(bytes).buffer);
   }
