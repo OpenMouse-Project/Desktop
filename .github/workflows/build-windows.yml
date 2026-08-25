@@ -2,10 +2,8 @@ name: Build Windows
 
 # Tauri can't cross-compile a Windows build from macOS — hidapi's native
 # bindings, the MSVC linker, and WebView2 all have to happen on Windows
-# itself. This runs the real build on a windows-latest runner and hands
-# back the installers as a downloadable workflow artifact, so getting a
-# Windows build doesn't require installing the Rust/C++ toolchain on the
-# gaming PC that's actually going to run the app.
+# itself. This sanity-checks compilation on every push to main. The real
+# signed builds happen in release.yml.
 on:
   push:
     branches: [main]
@@ -31,15 +29,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      # tauri.conf.json's own beforeBuildCommand runs `npm run build`
-      # (tsc + vite) before the Rust side compiles — this one command
-      # covers both halves.
-      - name: Build
-        run: npx tauri build --bundles none
+      - name: Build frontend
+        run: npm run build
 
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: openmouse-desktop-windows
-          path: src-tauri/target/release/openmouse-desktop.exe
-          if-no-files-found: error
+      - name: Build Rust binary
+        run: cargo build --release
+        working-directory: src-tauri
