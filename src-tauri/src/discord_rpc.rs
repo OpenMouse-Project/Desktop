@@ -5,9 +5,9 @@ use tauri::State;
 
 const CLIENT_ID: &str = "1541591980281299056";
 
-fn build_activity(details: String, state_text: String) -> activity::Activity<'static> {
+fn build_activity(name: String, details: String, state_text: String) -> activity::Activity<'static> {
     activity::Activity::new()
-        .name("OpenMouse")
+        .name(name)
         .details(details)
         .state(state_text)
         .buttons(vec![activity::Button::new(
@@ -45,8 +45,14 @@ pub fn enable(state: State<DiscordRpcState>) -> Result<(), String> {
     }
     applog!("[discord] IPC connection established");
 
+    let (name, details) = if cfg!(debug_assertions) {
+        ("OpenMouse Dev", "Dev Mode")
+    } else {
+        ("OpenMouse", "OpenMouse Desktop")
+    };
     let activity = build_activity(
-        "OpenMouse Desktop".to_string(),
+        name.to_string(),
+        details.to_string(),
         "Managing mouse settings".to_string(),
     );
     applog!("[discord] setting initial activity");
@@ -74,7 +80,11 @@ pub fn update_activity(
         return Err("Discord RPC is not enabled".to_string());
     };
 
-    if let Err(error) = client.set_activity(build_activity(details, state_text)) {
+    if let Err(error) = client.set_activity(build_activity(
+        "OpenMouse".to_string(),
+        details,
+        state_text,
+    )) {
         applog!("[discord] activity update failed: {error}");
         return Err(error.to_string());
     }
