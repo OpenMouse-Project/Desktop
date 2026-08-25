@@ -13,6 +13,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.9",
+    date: "2026-08-25",
+    changes: [
+      "Overview is wider (720px → 960px) so the device card has more room to breathe — Games and Settings are unchanged",
+    ],
+  },
+  {
     version: "0.0.8",
     date: "2026-08-25",
     changes: [

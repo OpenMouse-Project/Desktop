@@ -475,6 +475,14 @@ button:focus-visible {
   margin: 0 auto;
 }
 
+/* Wider than every other page — the device card (stat grid, DPI panel,
+   detail rows) reads as cramped at the shared 720px width now that the
+   window itself typically has a lot more room than that to give it. Only
+   Overview gets this; Games/Settings stay at the shared width. */
+.page-overview {
+  max-width: 960px;
+}
+
 .page-title {
   font-size: 1rem;
   font-weight: 600;

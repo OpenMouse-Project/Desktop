@@ -138,7 +138,7 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
     const canControl = connected.brand === "Logitech" && connectedInfo !== null;
     const rows = detailRows(status);
     return (
-      <section class="page">
+      <section class="page page-overview">
         <div class="device-card">
           <div class="device-card-header">
             <img
@@ -231,7 +231,7 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
   }
 
   return (
-    <section class="page">
+    <section class="page page-overview">
       <div class="device-list-header">
         <h1 class="page-title">Devices</h1>
         <button class="rescan-button" onClick={() => void refresh()} disabled={list.status === "loading"}>
