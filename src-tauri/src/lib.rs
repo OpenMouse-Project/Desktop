@@ -4,8 +4,14 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{LogicalSize, Manager, Size, State, WebviewWindow, WindowEvent};
 
+#[macro_use]
+mod applog;
+mod discord_rpc;
+mod games;
 mod hid;
+mod resource_monitor;
 use hid::{HidApiHandle, HidRegistry};
+use resource_monitor::ResourceMonitorState;
 
 /// The two toggable app modes.
 ///
@@ -70,8 +76,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(ModeState(Mutex::new(AppMode::FullDesktop)))
+        .manage(discord_rpc::DiscordRpcState::default())
         .manage(HidRegistry::default())
         .manage(HidApiHandle::default())
+        .manage(ResourceMonitorState::default())
+        .manage(games::ProcessListState::default())
         .invoke_handler(tauri::generate_handler![
             get_mode,
             set_mode,
@@ -81,6 +90,13 @@ pub fn run() {
             hid::hid_send_report,
             hid::hid_send_feature_report,
             hid::hid_get_feature_report,
+            discord_rpc::enable,
+            discord_rpc::disable,
+            discord_rpc::update_activity,
+            applog::get_logs,
+            applog::export_logs,
+            games::running_process_names,
+            resource_monitor::sample_resource_usage,
         ])
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Show OpenMouse", true, None::<&str>)?;

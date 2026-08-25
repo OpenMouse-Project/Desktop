@@ -1,0 +1,49 @@
+name: Build Windows
+
+# Tauri can't cross-compile a Windows build from macOS — hidapi's native
+# bindings, the MSVC linker, and WebView2 all have to happen on Windows
+# itself. This runs the real build on a windows-latest runner and hands
+# back the installers as a downloadable workflow artifact, so getting a
+# Windows build doesn't require installing the Rust/C++ toolchain on the
+# gaming PC that's actually going to run the app.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # tauri.conf.json's own beforeBuildCommand runs `npm run build`
+      # (tsc + vite) before the Rust side compiles — this one command
+      # covers both halves.
+      - name: Build
+        run: npm run tauri build
+
+      # tauri.conf.json's bundle.targets is "all", so on Windows this is
+      # both an NSIS .exe and an .msi.
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmouse-desktop-windows
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error

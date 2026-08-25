@@ -12,30 +12,50 @@
 //
 // `isSupported()` gating is skipped deliberately (see brands.ts) — a
 // candidate is accepted once its `open()` and `readStatus()` both succeed
-// within `PROBE_TIMEOUT_MS`, the same "does it actually answer" bar
+// within their own budgets below, the same "does it actually answer" bar
 // apply.mjs uses.
 
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import { allKnownVendorIds, candidatesForVendorId } from "./brands";
 import { listHidInterfaces, TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
+import { withHidOpenLock } from "./hid-open-lock";
 
-// Generous, and specifically sized for the worst real case: a non-Bolt
-// (Unifying/Lightspeed) Logitech receiver. `resolveDeviceIndex()`
-// (mouse-protocol/src/drivers/logitech/hidpp.ts) probes
-// `hidppDeviceIndexCandidates()` in turn — for a known receiver that's 7
-// candidates (pairing slots 0x01-0x06, then the direct index) — and on a
-// non-Bolt receiver each one that doesn't answer burns its own full
-// `REQUEST_TIMEOUT_MS` (6000ms) before moving on, not the much shorter
-// `BOLT_INDEX_PROBE_TIMEOUT_MS` (800ms) Bolt gets. A receiver whose paired
-// mouse sits on a late slot — or is simply out of range — can legitimately
-// need 7 * 6000ms = 42000ms before `resolveDeviceIndex()` gives up.
-// 8000ms (and 3000ms before that) was tried first and cuts `readStatus()`
-// off mid-probe on exactly this hardware: confirmed live against a real
-// Lightspeed USB receiver, which timed out here well before its own
-// internal probe could reach the slot the mouse was actually on. That reads
-// as "no device", not as a real rejection — Logitech mice went undetected
-// because of this budget, not because the driver itself failed.
-const PROBE_TIMEOUT_MS = 45000;
+// `open()` never touches the wire (see TauriHidDevice.open()/LogitechHidppClient.open())
+// — it just claims the HID handle and registers a listener — so it has no
+// business sharing a timeout sized for a multi-step protocol exchange.
+// Kept short so a genuinely broken open() fails fast.
+const OPEN_TIMEOUT_MS = 10000;
+
+// `readStatus()` is a full protocol walk, and two independent costs stack
+// inside it, confirmed live against real hardware:
+//
+// 1. Device-index discovery. For a known Logitech receiver,
+//    `resolveDeviceIndex()` (mouse-protocol/src/drivers/logitech/hidpp.ts)
+//    probes `hidppDeviceIndexCandidates()` in turn — 7 candidates (pairing
+//    slots 0x01-0x06, then the direct index) — and on a non-Bolt receiver
+//    each one that doesn't answer burns its own full `REQUEST_TIMEOUT_MS`
+//    (6000ms), not the much shorter `BOLT_INDEX_PROBE_TIMEOUT_MS` (800ms)
+//    Bolt gets. A receiver whose paired mouse sits on a late slot — or is
+//    simply out of range — can legitimately need 7 * 6000ms = 42000ms
+//    before `resolveDeviceIndex()` gives up. (A direct wired connection
+//    only has 2 candidates, so this cost is small there.)
+// 2. The feature walk itself, once resolved. `readStatus()` reads name,
+//    firmware, battery, DPI, DPI capabilities, report rate, onboard
+//    profiles, analog buttons, haptics, friendly name, hosts, wheel state,
+//    mode status — 20-30+ separate request/response round trips on a
+//    feature-rich mouse (a PRO X Superlight, live-tested here). Each one
+//    still pays the same-vendor-id multi-split fallback in `try_each`
+//    (src-tauri/src/hid.rs) before landing on the split that actually
+//    answers.
+//
+// 8000ms, then 45000ms sharing this timeout with `open()` were both tried
+// first and both cut `readStatus()` off mid-walk on real hardware: a
+// Lightspeed receiver (needs #1's full budget) and a wired PRO X
+// Superlight (needs #2's — confirmed making real progress, resolving the
+// device name and reading DPI/report-rate data, but still not finished at
+// 45000ms). Sized generously enough to cover both costs landing in the same
+// connect attempt, not tuned to either one alone.
+const READ_STATUS_TIMEOUT_MS = 120000;
 
 export interface CandidateInterface {
   info: HidInterfaceInfo;
@@ -44,6 +64,8 @@ export interface CandidateInterface {
 }
 
 export interface ConnectedDevice {
+  /** The interface this snapshot came from — `HidInterfaceInfo.key` (stable `vendorId:productId`). */
+  key: string;
   brand: string;
   status: MouseStatus;
 }
@@ -87,15 +109,19 @@ export async function listCandidateInterfaces(): Promise<CandidateInterface[]> {
  * Throws with the attempted candidates' errors when none answer.
  */
 export async function connectToInterface(info: HidInterfaceInfo): Promise<ConnectedDevice> {
+  return withHidOpenLock(info.key, () => connectToInterfaceLocked(info));
+}
+
+async function connectToInterfaceLocked(info: HidInterfaceInfo): Promise<ConnectedDevice> {
   const attempts: string[] = [];
   for (const candidate of candidatesForVendorId(info.vendorId, info.productId)) {
     const device = new TauriHidDevice(info);
     const client = new candidate.Client(device);
     try {
-      await withTimeout(client.open(), PROBE_TIMEOUT_MS, `${candidate.name}.open()`);
-      const status = await withTimeout(client.readStatus(), PROBE_TIMEOUT_MS, `${candidate.name}.readStatus()`);
+      await withTimeout(client.open(), OPEN_TIMEOUT_MS, `${candidate.name}.open()`);
+      const status = await withTimeout(client.readStatus(), READ_STATUS_TIMEOUT_MS, `${candidate.name}.readStatus()`);
       await client.close().catch(() => undefined);
-      return { brand: candidate.brand, status };
+      return { key: info.key, brand: candidate.brand, status };
     } catch (error) {
       await client.close().catch(() => undefined);
       const message = error instanceof Error ? error.message : String(error);

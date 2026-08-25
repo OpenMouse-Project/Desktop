@@ -70,7 +70,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use hidapi::HidApi;
 use serde::Serialize;
@@ -109,6 +109,16 @@ struct OpenSplit {
 struct OpenGroup {
     splits: Vec<Arc<OpenSplit>>,
     readers: Vec<JoinHandle<()>>,
+    /// Which split answered a given report id last time. WebHID never has to
+    /// guess this — the browser already knows which collection declares a
+    /// report id from `device.collections` and routes straight to it.
+    /// hidapi's flat device list gives us no such map, so `try_each` used to
+    /// re-probe from split 0 on every single call — for a device where the
+    /// answering split isn't first, that's a guaranteed-fail write before
+    /// the one that actually works, paid again on every one of the dozens of
+    /// requests a full `readStatus()` walk makes. Once a split answers for a
+    /// report id, remember it and try that one first next time.
+    routes: Mutex<HashMap<u8, usize>>,
 }
 
 /// One `HidApi` for the app's lifetime — see the module docs above for why
@@ -171,6 +181,20 @@ fn with_hid_api<T>(
     f(guard.as_mut().expect("just initialized above"))
 }
 
+// hid_list_interfaces and hid_open stay synchronous (blocking the main
+// thread) deliberately, unlike every other command below: they're the two
+// that touch `HidApi` itself — `HidApi::new()`/`refresh_devices()`/
+// `open_path()`, the calls that actually open a device handle through
+// macOS's IOHIDManager, as opposed to reading/writing an already-open one.
+// Making them `async fn` (moving that off the main thread, onto Tokio's
+// runtime) reproduced a real hang requiring a force-quit — every prior
+// successful connect this session happened with these on the main thread,
+// and there is no equivalent evidence they're safe off it the way the
+// reader threads' plain read()/write() on an open handle demonstrably are
+// (those have run on a spawned thread since the very start of this file's
+// history without incident). Left blocking here; the high-frequency calls
+// during a `readStatus()` walk — the ones that actually caused the original
+// UI freeze — are the ones below that stayed async.
 #[tauri::command]
 pub fn hid_list_interfaces(
     api_handle: tauri::State<HidApiHandle>,
@@ -185,7 +209,10 @@ pub fn hid_list_interfaces(
             if is_live_input_collection(info.usage_page(), info.usage()) {
                 continue;
             }
-            groups.entry((info.vendor_id(), info.product_id())).or_default().push(info);
+            groups
+                .entry((info.vendor_id(), info.product_id()))
+                .or_default()
+                .push(info);
         }
 
         // A device whose only matching collection(s) were the live input
@@ -219,6 +246,8 @@ pub fn hid_list_interfaces(
     })
 }
 
+// See the comment on hid_list_interfaces above — kept synchronous for the
+// same reason.
 #[tauri::command]
 pub fn hid_open(
     app: tauri::AppHandle,
@@ -228,9 +257,9 @@ pub fn hid_open(
     product_id: u16,
 ) -> Result<(), String> {
     let group_key = (vendor_id, product_id);
-    eprintln!("[hid] hid_open start {vendor_id:04x}:{product_id:04x}");
+    applog!("[hid] hid_open start {vendor_id:04x}:{product_id:04x}");
     if registry.0.lock().unwrap().contains_key(&group_key) {
-        eprintln!("[hid] hid_open: already open, returning");
+        applog!("[hid] hid_open: already open, returning");
         return Ok(());
     }
 
@@ -267,11 +296,14 @@ pub fn hid_open(
         if opened.is_empty() {
             return Err(last_error.unwrap_or_else(|| "No HID interface could be opened.".into()));
         }
-        eprintln!("[hid] hid_open: opened {} split(s)", opened.len());
+        applog!("[hid] hid_open: opened {} split(s)", opened.len());
         Ok(opened)
     })?;
 
     let key = interface_key(vendor_id, product_id);
+    // Shared across every split's reader thread for this group — see
+    // `spawn_reader`'s own docs for why this exists.
+    let last_reply = Arc::new(Mutex::new(None));
     let mut splits = Vec::new();
     let mut readers = Vec::new();
     for device in devices {
@@ -280,16 +312,134 @@ pub fn hid_open(
             device: Mutex::new(device),
             stop: stop.clone(),
         });
-        readers.push(spawn_reader(app.clone(), key.clone(), split.clone()));
+        readers.push(spawn_reader(
+            app.clone(),
+            key.clone(),
+            split.clone(),
+            last_reply.clone(),
+        ));
         splits.push(split);
     }
 
-    registry.0.lock().unwrap().insert(group_key, OpenGroup { splits, readers });
-    eprintln!("[hid] hid_open: done, registered group");
+    registry.0.lock().unwrap().insert(
+        group_key,
+        OpenGroup {
+            splits,
+            readers,
+            routes: Mutex::new(HashMap::new()),
+        },
+    );
+    applog!("[hid] hid_open: done, registered group");
     Ok(())
 }
 
-fn spawn_reader(app: tauri::AppHandle, key: String, split: Arc<OpenSplit>) -> JoinHandle<()> {
+/// Standard HID++ short/long report ids (0x10/0x11) — see `brands.ts`'s own
+/// list: nearly every driver in this app that answers a request/response
+/// exchange through an input report (not a plain feature report) uses these
+/// two, Logitech's HID++ included.
+const REQUEST_REPLY_REPORT_IDS: [u8; 2] = [0x10, 0x11];
+
+/// How recent a byte-identical prior reply has to be to count as the SAME
+/// physical report delivered twice (macOS handing it to every open split's
+/// handle) rather than a coincidentally-identical reply to a later, distinct
+/// request. Duplicate deliveries land within a couple of poll cycles of each
+/// other; a real request/reply round trip (write + device turnaround + read)
+/// is comfortably longer than this even on a fast wired connection.
+const DUPLICATE_DELIVERY_WINDOW: Duration = Duration::from_millis(50);
+
+/// HID++ 2.0 error codes (byte 4 of a 0xFF error reply) — mirrors
+/// `HIDPP20_ERRORS` in mouse-protocol's `logitech/index.ts`, purely so a
+/// rejection is legible in these logs without needing the webview's own
+/// devtools console open.
+fn hidpp20_error_name(code: u8) -> Option<&'static str> {
+    Some(match code {
+        0x01 => "unknown request",
+        0x02 => "invalid argument",
+        0x03 => "value out of range",
+        0x04 => "hardware error",
+        0x05 => "Logitech internal error",
+        0x06 => "invalid feature index",
+        0x07 => "invalid function",
+        0x08 => "device busy",
+        0x09 => "unsupported",
+        _ => return None,
+    })
+}
+
+/// HID++ 1.0 error codes (byte 4 of a 0x8F error reply) — mirrors
+/// `HIDPP10_ERRORS` in the same file.
+fn hidpp10_error_name(code: u8) -> Option<&'static str> {
+    Some(match code {
+        0x01 => "invalid command",
+        0x02 => "invalid address",
+        0x03 => "invalid value",
+        0x04 => "connection request failed",
+        0x05 => "too many devices",
+        0x06 => "already exists",
+        0x07 => "device busy",
+        0x08 => "unknown device",
+        0x09 => "resource error",
+        0x0a => "request unavailable",
+        0x0b => "unsupported parameter value",
+        0x0c => "wrong PIN code",
+        _ => return None,
+    })
+}
+
+/// Decodes an outgoing HID++ short/long request's own header — deviceIndex,
+/// featureIndex, function id (the software id in the low nibble stripped
+/// off), and parameter bytes — so a request can be matched by eye against
+/// the reply (or rejection) it produced a few lines later in the log.
+fn describe_hidpp_request(data: &[u8]) -> String {
+    if data.len() < 3 {
+        return format!("raw={data:02x?}");
+    }
+    let device_index = data[0];
+    let feature_index = data[1];
+    let function_id = data[2] >> 4;
+    let params = &data[3..];
+    format!(
+        "hidpp deviceIndex=0x{device_index:02x} featureIndex=0x{feature_index:02x} \
+         functionId=0x{function_id:02x} params={params:02x?}"
+    )
+}
+
+/// Decodes an incoming report as a HID++ error notification, if it is one —
+/// `[deviceIndex, 0xFF|0x8F, featureIndex, function+softwareId, errorCode]`,
+/// mirroring `hidppErrorForRequest` in mouse-protocol's own driver. Returns
+/// `None` for anything else (a normal reply, or a raw input/status report).
+fn describe_hidpp_error(report_id: u8, data: &[u8]) -> Option<String> {
+    if report_id != 0x10 && report_id != 0x11 {
+        return None;
+    }
+    // `data` is the payload after the leading report id byte, same
+    // alignment as mouse-protocol's own `report` array (WebHID strips the
+    // report id out separately too, into `event.reportId`): data[0] is
+    // deviceIndex, data[1] is the 0xFF/0x8F error marker, data[2] is the
+    // echoed featureIndex from the rejected request, data[3] its echoed
+    // function+softwareId byte, data[4] the error code.
+    let marker = *data.get(1)?;
+    let feature_index = *data.get(2)?;
+    let function_byte = *data.get(3)?;
+    let error_code = *data.get(4).unwrap_or(&0);
+    let (kind, name) = match marker {
+        0xff => ("HID++ 2.0", hidpp20_error_name(error_code)),
+        0x8f => ("HID++ 1.0", hidpp10_error_name(error_code)),
+        _ => return None,
+    };
+    let reason = name.unwrap_or("unknown error");
+    Some(format!(
+        "{kind} ERROR: featureIndex=0x{feature_index:02x} functionByte=0x{function_byte:02x} \
+         code=0x{error_code:02x} ({reason})"
+    ))
+}
+
+fn spawn_reader(
+    app: tauri::AppHandle,
+    key: String,
+    split: Arc<OpenSplit>,
+    last_reply: Arc<Mutex<Option<(u8, Vec<u8>, Instant)>>>,
+) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut buffer = [0u8; 64];
         while !split.stop.load(Ordering::Relaxed) {
@@ -301,6 +451,27 @@ fn spawn_reader(app: tauri::AppHandle, key: String, split: Arc<OpenSplit>) -> Jo
             // query is what "Connecting…" hanging looked like. If a writer
             // currently holds the lock, skip this cycle instead of blocking
             // for it.
+            //
+            // CONFIRMED on real hardware: this alone isn't enough. When
+            // read_timeout() finds no data waiting, it blocks for the full
+            // READ_POLL_TIMEOUT_MS while STILL HOLDING the try_lock guard,
+            // and this loop went straight back into try_lock() the instant
+            // that guard dropped, with nothing in between. A writer parked
+            // on the blocking `.lock()` in try_each has no fairness
+            // guarantee against that: macOS's pthread_mutex (what
+            // std::sync::Mutex wraps here) doesn't queue a parked waiter
+            // ahead of a thread that keeps re-acquiring via try_lock, so
+            // this loop could win every single re-lock race indefinitely —
+            // a real livelock, not a slow poll. Seen live: resolveDeviceIndex
+            // walking receiver pairing slots got every reply promptly right
+            // up until the write for deviceIndex=0xff, whose try_each sat on
+            // "waiting for lock…" and never progressed — this loop had just
+            // finished draining a backlog and immediately re-entered another
+            // 200ms held read_timeout, over and over, never leaving a gap
+            // for the scheduler to hand the lock to the parked writer. The
+            // short sleep below (outside the lock, every iteration — not
+            // only after a failed try_lock) is what actually creates that
+            // gap.
             let read = match split.device.try_lock() {
                 Ok(device) => device.read_timeout(&mut buffer, READ_POLL_TIMEOUT_MS),
                 Err(_) => {
@@ -308,6 +479,7 @@ fn spawn_reader(app: tauri::AppHandle, key: String, split: Arc<OpenSplit>) -> Jo
                     continue;
                 }
             };
+            thread::sleep(Duration::from_millis(5));
             match read {
                 Ok(0) => continue,
                 Ok(length) => {
@@ -319,19 +491,93 @@ fn spawn_reader(app: tauri::AppHandle, key: String, split: Arc<OpenSplit>) -> Jo
                     // own payload content, not strictly by report id.
                     let report_id = buffer[0];
                     let data = buffer[1..length].to_vec();
-                    eprintln!(
-                        "[hid] reader {key}: got {length} bytes, reportId=0x{report_id:02x} data={data:02x?}"
-                    );
+                    // CONFIRMED on real hardware: macOS delivers the same
+                    // physical report to every open split's handle, not just
+                    // the one collection that actually declares it — every
+                    // request/reply exchange gets emitted here once per
+                    // split, not once. A driver's own reply matching keys on
+                    // (deviceIndex, featureIndex, functionId), not report
+                    // content, and several unrelated requests can share that
+                    // key (every HID++ getFeature() call does) — so a
+                    // duplicate arriving late enough to land after the next
+                    // request went out gets consumed as that request's
+                    // answer instead, silently corrupting whichever field
+                    // was being read at the time. WebHID never has this
+                    // problem: one collection is one `HIDDevice`, so a
+                    // report is only ever delivered to the listener for the
+                    // collection that actually declared it. Collapsing an
+                    // exact repeat of the immediately preceding
+                    // request/reply-shaped report is the equivalent fix
+                    // here. Left unrestricted to every report id — a raw
+                    // input stream (movement, clicks) can legitimately
+                    // repeat the same idle payload many times in a row, and
+                    // collapsing those would silently drop real reports.
+                    //
+                    // CONFIRMED on real hardware this needs a time window,
+                    // not a bare content match: an IRoot.getFeature() "not
+                    // found" reply carries no trace of which feature id was
+                    // asked (deviceIndex, echoed featureIndex=0, echoed
+                    // functionId, all-zero payload) — so two DIFFERENT,
+                    // genuinely sequential getFeature() calls that both come
+                    // back "not found" are byte-for-byte identical. A bare
+                    // content-match dedup silently ate the second one
+                    // (getFeature(0x1001) after getFeature(0x1000), both
+                    // absent on this mouse) and readStatus() hung waiting
+                    // for a reply that was dropped, not missing. The actual
+                    // macOS duplicate-delivery bug this exists for lands
+                    // within a millisecond or two — the same physical report
+                    // handed to every open split's reader thread nearly
+                    // simultaneously — while a new request's real reply is
+                    // always at least a full write+round-trip later. Only
+                    // treat a content match as a duplicate within a window
+                    // comfortably under that round trip.
+                    let mut last = last_reply.lock().unwrap();
+                    let is_duplicate = REQUEST_REPLY_REPORT_IDS.contains(&report_id)
+                        && matches!(
+                            last.as_ref(),
+                            Some((last_id, last_data, seen_at))
+                                if *last_id == report_id
+                                    && *last_data == data
+                                    && seen_at.elapsed() < DUPLICATE_DELIVERY_WINDOW
+                        );
+                    if is_duplicate {
+                        continue;
+                    }
+                    if REQUEST_REPLY_REPORT_IDS.contains(&report_id) {
+                        *last = Some((report_id, data.clone(), Instant::now()));
+                    }
+                    drop(last);
+                    // Only log HID++ protocol traffic (report ids 0x10/0x11),
+                    // and only once it's cleared the dedup check above — not
+                    // every raw report a split hands us. The continuous
+                    // stream of movement/click/battery-poll reports on other
+                    // report ids is real and gets emitted below same as
+                    // always, it's just not useful to print: at full poll
+                    // rate it drowns the handful of request/reply lines that
+                    // actually matter for debugging a connect in thousands of
+                    // irrelevant ones.
+                    if REQUEST_REPLY_REPORT_IDS.contains(&report_id) {
+                        applog!(
+                            "[hid] reader {key}: got {length} bytes, reportId=0x{report_id:02x} data={data:02x?}"
+                        );
+                        if let Some(decoded) = describe_hidpp_error(report_id, &data) {
+                            applog!("[hid] reader {key}: *** {decoded} ***");
+                        }
+                    }
                     let _ = app.emit(
                         "hid-input-report",
-                        HidInputReportPayload { key: key.clone(), report_id, data },
+                        HidInputReportPayload {
+                            key: key.clone(),
+                            report_id,
+                            data,
+                        },
                     );
                 }
                 Err(error) => {
                     // A transient read error (e.g. device unplugged) — the
                     // stop flag (set by hid_close) is what ends this loop
                     // deliberately; anything else just backs off briefly.
-                    eprintln!("[hid] reader {key}: read_timeout error: {error}");
+                    applog!("[hid] reader {key}: read_timeout error: {error}");
                     thread::sleep(Duration::from_millis(50));
                 }
             }
@@ -340,8 +586,8 @@ fn spawn_reader(app: tauri::AppHandle, key: String, split: Arc<OpenSplit>) -> Jo
 }
 
 #[tauri::command]
-pub fn hid_close(
-    registry: tauri::State<HidRegistry>,
+pub async fn hid_close(
+    registry: tauri::State<'_, HidRegistry>,
     vendor_id: u16,
     product_id: u16,
 ) -> Result<(), String> {
@@ -363,55 +609,65 @@ pub fn hid_close(
 }
 
 #[tauri::command]
-pub fn hid_send_report(
-    registry: tauri::State<HidRegistry>,
+pub async fn hid_send_report(
+    registry: tauri::State<'_, HidRegistry>,
     vendor_id: u16,
     product_id: u16,
     report_id: u8,
     data: Vec<u8>,
 ) -> Result<(), String> {
-    eprintln!("[hid] hid_send_report {vendor_id:04x}:{product_id:04x} reportId=0x{report_id:02x} len={}", data.len());
-    let result = with_open_group(&registry, vendor_id, product_id, |splits| {
+    applog!(
+        "[hid] hid_send_report {vendor_id:04x}:{product_id:04x} reportId=0x{report_id:02x} {}",
+        describe_hidpp_request(&data),
+    );
+    let result = with_open_group(&registry, vendor_id, product_id, |splits, routes| {
         let mut frame = Vec::with_capacity(data.len() + 1);
         frame.push(report_id);
         frame.extend_from_slice(&data);
-        try_each(splits, |device| device.write(&frame).map(|_| ()))
+        try_each(splits, routes, report_id, |device| {
+            device.write(&frame).map(|_| ())
+        })
     });
-    eprintln!("[hid] hid_send_report done: {result:?}");
+    applog!("[hid] hid_send_report done: {result:?}");
     result
 }
 
 #[tauri::command]
-pub fn hid_send_feature_report(
-    registry: tauri::State<HidRegistry>,
+pub async fn hid_send_feature_report(
+    registry: tauri::State<'_, HidRegistry>,
     vendor_id: u16,
     product_id: u16,
     report_id: u8,
     data: Vec<u8>,
 ) -> Result<(), String> {
-    eprintln!("[hid] hid_send_feature_report {vendor_id:04x}:{product_id:04x} reportId=0x{report_id:02x} len={}", data.len());
-    let result = with_open_group(&registry, vendor_id, product_id, |splits| {
+    applog!(
+        "[hid] hid_send_feature_report {vendor_id:04x}:{product_id:04x} reportId=0x{report_id:02x} {}",
+        describe_hidpp_request(&data),
+    );
+    let result = with_open_group(&registry, vendor_id, product_id, |splits, routes| {
         let mut frame = Vec::with_capacity(data.len() + 1);
         frame.push(report_id);
         frame.extend_from_slice(&data);
-        try_each(splits, |device| device.send_feature_report(&frame))
+        try_each(splits, routes, report_id, |device| {
+            device.send_feature_report(&frame)
+        })
     });
-    eprintln!("[hid] hid_send_feature_report done: {result:?}");
+    applog!("[hid] hid_send_feature_report done: {result:?}");
     result
 }
 
 #[tauri::command]
-pub fn hid_get_feature_report(
-    registry: tauri::State<HidRegistry>,
+pub async fn hid_get_feature_report(
+    registry: tauri::State<'_, HidRegistry>,
     vendor_id: u16,
     product_id: u16,
     report_id: u8,
     length: usize,
 ) -> Result<Vec<u8>, String> {
-    eprintln!("[hid] hid_get_feature_report {vendor_id:04x}:{product_id:04x} reportId=0x{report_id:02x} length={length}");
-    let result = with_open_group(&registry, vendor_id, product_id, |splits| {
+    applog!("[hid] hid_get_feature_report {vendor_id:04x}:{product_id:04x} reportId=0x{report_id:02x} length={length}");
+    let result = with_open_group(&registry, vendor_id, product_id, |splits, routes| {
         let mut result: Option<Vec<u8>> = None;
-        let outcome = try_each(splits, |device| {
+        let outcome = try_each(splits, routes, report_id, |device| {
             let mut buffer = vec![0u8; length + 1];
             buffer[0] = report_id;
             let read = device.get_feature_report(&mut buffer)?;
@@ -420,39 +676,62 @@ pub fn hid_get_feature_report(
         });
         outcome.and(result.ok_or_else(|| "no split returned data".to_string()))
     });
-    eprintln!("[hid] hid_get_feature_report done: {result:?}");
+    applog!("[hid] hid_get_feature_report done: {result:?}");
     result
 }
 
-/// Runs `operation` against the open splits for a group, trying every split
-/// in turn — the report id in question may only be declared on one of them,
-/// same reasoning as the Node adapter's `sendReport`/`receiveFeatureReport`.
+/// Runs `operation` against the open splits for a group (plus its
+/// report-id→split route cache — see `OpenGroup::routes`), trying every
+/// split in turn on a cache miss — the report id in question may only be
+/// declared on one of them, same reasoning as the Node adapter's
+/// `sendReport`/`receiveFeatureReport`.
 fn with_open_group<T>(
-    registry: &tauri::State<HidRegistry>,
+    registry: &tauri::State<'_, HidRegistry>,
     vendor_id: u16,
     product_id: u16,
-    operation: impl FnOnce(&[Arc<OpenSplit>]) -> Result<T, String>,
+    operation: impl FnOnce(&[Arc<OpenSplit>], &Mutex<HashMap<u8, usize>>) -> Result<T, String>,
 ) -> Result<T, String> {
     let map = registry.0.lock().unwrap();
     let group = map
         .get(&(vendor_id, product_id))
         .ok_or_else(|| "This HID interface is not open.".to_string())?;
-    operation(&group.splits)
+    operation(&group.splits, &group.routes)
 }
 
 fn try_each(
     splits: &[Arc<OpenSplit>],
+    routes: &Mutex<HashMap<u8, usize>>,
+    report_id: u8,
     mut operation: impl FnMut(&hidapi::HidDevice) -> hidapi::HidResult<()>,
 ) -> Result<(), String> {
+    // Try whichever split answered this exact report id last time first —
+    // see `OpenGroup::routes`. Falls through to the rest in order on a miss
+    // (first call for this report id, or the routed split stopped working),
+    // so this is a pure optimization, never a correctness change.
+    let hinted = routes.lock().unwrap().get(&report_id).copied();
+    let order: Vec<usize> = match hinted {
+        Some(hint) if hint < splits.len() => std::iter::once(hint)
+            .chain((0..splits.len()).filter(|&i| i != hint))
+            .collect(),
+        _ => (0..splits.len()).collect(),
+    };
+
     let mut last_error = None;
-    for (index, split) in splits.iter().enumerate() {
-        eprintln!("[hid] try_each: split {index}/{} waiting for lock…", splits.len());
+    for index in order {
+        let split = &splits[index];
+        applog!(
+            "[hid] try_each: split {index}/{} waiting for lock…",
+            splits.len()
+        );
         let device = split.device.lock().unwrap();
-        eprintln!("[hid] try_each: split {index} got lock, calling operation…");
+        applog!("[hid] try_each: split {index} got lock, calling operation…");
         let outcome = operation(&device);
-        eprintln!("[hid] try_each: split {index} operation returned: {outcome:?}");
+        applog!("[hid] try_each: split {index} operation returned: {outcome:?}");
         match outcome {
-            Ok(()) => return Ok(()),
+            Ok(()) => {
+                routes.lock().unwrap().insert(report_id, index);
+                return Ok(());
+            }
             Err(error) => last_error = Some(error.to_string()),
         }
     }

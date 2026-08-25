@@ -5,12 +5,16 @@ import { FullDesktopView } from "./layouts/FullDesktopView";
 import "./App.css";
 
 type AppMode = "bridge" | "full-desktop";
+const DISCORD_RPC_PREFERENCE = "openmouse.discord-rpc.enabled";
 
 function App() {
   const [mode, setModeState] = useState<AppMode | null>(null);
 
   useEffect(() => {
     invoke<AppMode>("get_mode").then(setModeState);
+    if (localStorage.getItem(DISCORD_RPC_PREFERENCE) === "true") {
+      void invoke("enable");
+    }
   }, []);
 
   async function switchMode(next: AppMode) {

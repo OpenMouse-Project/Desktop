@@ -17,6 +17,8 @@
 
   --success: #69d28d;
   --warning: #e8b267;
+  --accent: #f5975c;
+  --accent-ink: #1a0e06;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
 }
@@ -218,6 +220,16 @@ button:focus-visible {
   background: var(--muted);
 }
 
+.switch input:checked + .switch-track {
+  background: var(--text);
+  border-color: var(--text);
+}
+
+.switch input:checked + .switch-track::before {
+  background: var(--ink);
+  transform: translateX(16px);
+}
+
 /* ---------- Full Desktop layout ---------- */
 
 .full-desktop-shell {
@@ -253,6 +265,84 @@ button:focus-visible {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.sidebar-device {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-device:hover {
+  background: var(--hover);
+  border-color: var(--line-strong);
+}
+
+.sidebar-device-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--dim);
+  /* No overflow:hidden here — the status dot below is deliberately
+     positioned to overflow this box's corner, and a clipping parent cut it
+     off into a weird partial-circle. Round/clip the photo itself instead
+     (a sibling, not this box) so the dot stays a clean full circle. */
+}
+
+.sidebar-device-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 3px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.sidebar-device-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--success, #3ecf6a);
+  border: 2px solid var(--card);
+}
+
+.sidebar-device-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.sidebar-device-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-device-brand {
+  font-size: 0.72rem;
+  color: var(--faint);
 }
 
 .sidebar-empty {
@@ -320,8 +410,15 @@ button:focus-visible {
 }
 
 .status-chip-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   font-size: 0.85rem;
   color: var(--dim);
+}
+
+.status-chip-charging {
+  color: var(--success);
 }
 
 .app-header-tabs {
@@ -348,6 +445,12 @@ button:focus-visible {
   flex: 1;
   overflow-y: auto;
   padding: 2rem;
+  /* Still scrolls (wheel/trackpad) — just no visible track/thumb. */
+  scrollbar-width: none;
+}
+
+.full-desktop-content::-webkit-scrollbar {
+  display: none;
 }
 
 .page {
@@ -362,6 +465,271 @@ button:focus-visible {
   color: var(--dim);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.games-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.game-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.game-card.detected {
+  border-color: var(--success);
+  box-shadow: 0 0 0 1px var(--success), 0 0 18px 1px color-mix(in srgb, var(--success) 55%, transparent);
+  animation: game-card-glow 2.2s ease-in-out infinite;
+}
+
+@keyframes game-card-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 1px var(--success), 0 0 14px 0px color-mix(in srgb, var(--success) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 1px var(--success), 0 0 22px 3px color-mix(in srgb, var(--success) 65%, transparent);
+  }
+}
+
+.game-card-art-wrap {
+  position: relative;
+}
+
+.game-card-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--bright);
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.game-card-art {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--raised);
+}
+
+.game-card-running-badge {
+  position: absolute;
+  left: 0.5rem;
+  bottom: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(9, 9, 11, 0.75);
+  backdrop-filter: blur(4px);
+  color: var(--success);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.game-card-running-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.game-card-content {
+  min-width: 0;
+}
+
+.game-card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.game-card-title-row h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-card-profile-button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  border: 1px solid var(--line);
+  background: var(--control);
+  color: var(--dim);
+  padding: 0.3rem;
+  border-radius: 6px;
+}
+
+.game-card-profile-button:hover {
+  background: var(--hover);
+  color: var(--bright);
+}
+
+.game-card-profile-auto-icon {
+  color: var(--success);
+}
+
+.game-card h2 {
+  margin: 0;
+  color: var(--bright);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.game-card p {
+  margin: 0.3rem 0 0;
+  color: var(--dim);
+  font-size: 0.75rem;
+}
+
+.game-card-executables {
+  display: block;
+  margin-top: 0.55rem;
+  overflow: hidden;
+  color: var(--faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.65rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.games-error {
+  color: #ff8585;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 600px) {
+  .games-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 400px) {
+  .games-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ---------- Game profile panel (Games tab) ---------- */
+
+.game-profile-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(9, 9, 11, 0.6);
+  backdrop-filter: blur(2px);
+  padding: 1.5rem;
+  z-index: 50;
+}
+
+.game-profile-panel {
+  width: 100%;
+  max-width: 420px;
+  max-height: 100%;
+  overflow-y: auto;
+  scrollbar-width: none;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 1.5rem;
+}
+
+.game-profile-panel::-webkit-scrollbar {
+  display: none;
+}
+
+.game-profile-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.game-profile-panel-header h2 {
+  margin: 0.15rem 0 0;
+  font-size: 1.05rem;
+  color: var(--bright);
+}
+
+.game-profile-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.game-profile-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.78rem;
+  color: var(--faint);
+  line-height: 1.4;
+}
+
+.icon-button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  background: var(--control);
+  color: var(--dim);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.icon-button:hover {
+  background: var(--hover);
+  color: var(--bright);
+}
+
+.chip-clear {
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--faint);
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+}
+
+.chip-clear:hover {
+  color: var(--dim);
+  border-color: var(--line-strong);
+}
+
+/* The polling-rate row (setting-row-block, GameProfilePanel) reuses
+   DevicePerformanceTab's .performance-chip-group, which right-aligns into a
+   320px column — sized for that tab's much wider side-by-side row. Stacked
+   full-width here instead (see setting-row-block above), so let the chips
+   actually use that width and wrap left-aligned rather than staying
+   squeezed into the same narrow right-hand column. */
+.setting-row-block .performance-chip-group {
+  justify-content: flex-start;
+  max-width: none;
 }
 
 .empty-state {
@@ -448,6 +816,24 @@ button:focus-visible {
   background: var(--card);
 }
 
+.device-list-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.device-list-row-image {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  padding: 4px;
+}
+
 .device-list-row-info {
   display: flex;
   flex-direction: column;
@@ -531,6 +917,17 @@ button:focus-visible {
   margin-bottom: 1.5rem;
 }
 
+.device-card-image {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  padding: 6px;
+}
+
 .device-card-header h2 {
   margin: 0;
   font-size: 1.05rem;
@@ -550,7 +947,7 @@ button:focus-visible {
 
 .device-stat-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.75rem;
 }
 
@@ -580,6 +977,190 @@ button:focus-visible {
   color: var(--bright);
 }
 
+.device-stat-sub {
+  font-size: 0.75rem;
+  color: var(--faint);
+}
+
+.device-detail-list {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1.25rem;
+}
+
+.device-detail-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+}
+
+.device-detail-row + .device-detail-row {
+  border-top: 1px solid var(--line);
+}
+
+.device-detail-label {
+  font-size: 0.78rem;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.device-detail-value {
+  font-size: 0.85rem;
+  color: var(--dim);
+  text-align: right;
+}
+
+.device-detail-value-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
+
+.device-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin: 1.5rem 0 1rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.5rem;
+}
+
+.device-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 0.4rem 0.85rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.device-tabs button.active {
+  color: var(--text);
+  background: var(--raised);
+}
+
+.performance-tab {
+  margin-top: 0.25rem;
+}
+
+.performance-dpi-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.performance-dpi-input {
+  width: 90px;
+  border: 1px solid var(--line);
+  background: var(--control);
+  color: var(--bright);
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.performance-dpi-input:disabled {
+  opacity: 0.6;
+}
+
+.performance-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: flex-end;
+  max-width: 320px;
+}
+
+.performance-chip {
+  border: 1px solid var(--line);
+  background: var(--control);
+  color: var(--dim);
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+}
+
+.performance-chip:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--bright);
+}
+
+.performance-chip.active {
+  border-color: var(--line-strong);
+  background: var(--raised);
+  color: var(--bright);
+  font-weight: 600;
+}
+
+.performance-chip:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.toast-host {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.5rem;
+  max-width: 340px;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--raised);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  animation: toast-in 0.18s ease-out;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.toast-success .toast-icon { color: var(--success); }
+.toast-error .toast-icon { color: var(--warning); }
+.toast-info .toast-icon { color: var(--muted); }
+
+.toast-text {
+  flex: 1;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--bright);
+  white-space: pre-wrap;
+}
+
+.toast-dismiss {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--faint);
+  padding: 0.1rem;
+  border-radius: 999px;
+  line-height: 0;
+}
+
+.toast-dismiss:hover {
+  color: var(--bright);
+  background: var(--hover);
+}
+
 .setting-row {
   display: flex;
   align-items: center;
@@ -592,6 +1173,74 @@ button:focus-visible {
   margin-bottom: 0.75rem;
 }
 
+/* For a row whose control is too wide/tall to sit beside the label —
+   stacks label above control instead of side-by-side. */
+.setting-row-block {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.resource-monitor {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
+.resource-monitor-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: var(--raised);
+}
+
+.resource-monitor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.resource-monitor-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.resource-monitor-current {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--bright);
+}
+
+.sparkline {
+  display: block;
+  width: 100%;
+  height: 40px;
+  color: var(--dim);
+}
+
+.sparkline-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.resource-monitor-stats {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.4rem;
+  font-size: 0.7rem;
+  color: var(--faint);
+}
+
 .setting-label {
   display: flex;
   flex-direction: column;
@@ -602,6 +1251,12 @@ button:focus-visible {
   font-weight: 600;
   font-size: 0.9rem;
   color: var(--bright);
+}
+
+.discord-setting-title {
+  position: relative;
+  display: inline-block;
+  width: fit-content;
 }
 
 .setting-description {
@@ -666,6 +1321,11 @@ button:focus-visible {
 .bridge-settings {
   flex: 1;
   overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.bridge-settings::-webkit-scrollbar {
+  display: none;
 }
 
 .bridge-settings .page {
@@ -724,3 +1384,281 @@ button:focus-visible {
   background: var(--card);
 }
 
+
+/* ---------- DPI panel + segmented controls (Performance tab) ---------- */
+
+.setting-eyebrow {
+  font-size: 0.68rem;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.dpi-panel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.1rem 1.25rem;
+  background: var(--card);
+  margin-bottom: 0.75rem;
+}
+
+.dpi-panel-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.dpi-panel-value-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dpi-panel-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--bright);
+  letter-spacing: -0.01em;
+}
+
+.dpi-panel-badge {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--control);
+  color: var(--dim);
+}
+
+.dpi-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.dpi-preset {
+  border: 1px solid var(--line);
+  background: var(--control);
+  color: var(--dim);
+  padding: 0.55rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.dpi-preset:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--bright);
+}
+
+.dpi-preset.active {
+  border-color: var(--line-strong);
+  background: var(--raised);
+  color: var(--bright);
+}
+
+.dpi-preset:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.dpi-axis-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.dpi-axis-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.dpi-axis-field span {
+  font-size: 0.7rem;
+  color: var(--faint);
+}
+
+.dpi-axis-field input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--control);
+  color: var(--bright);
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  /* An empty number input's native up/down stepper sits right next to a
+     "Not set" placeholder and reads as a dropdown chevron, not a text
+     field — CONFIRMED the source of that look in the game profile panel
+     (empty by default until a value's chosen). Every other numeric input
+     in the app hides its own spinner already; this one just never had an
+     empty state to expose it before. */
+  appearance: none;
+  -moz-appearance: textfield;
+}
+
+.dpi-axis-field input::-webkit-outer-spin-button,
+.dpi-axis-field input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.dpi-axis-field input:disabled {
+  opacity: 0.6;
+}
+
+.dpi-apply-button {
+  flex-shrink: 0;
+}
+
+.dpi-current-caption {
+  margin: 0.75rem 0 0;
+  font-size: 0.75rem;
+  color: var(--faint);
+}
+
+.sensor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.1rem 1.25rem;
+  background: var(--card);
+}
+
+.sensor-panel-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--bright);
+}
+
+.sensor-panel-description {
+  margin: -0.3rem 0 0;
+  font-size: 0.78rem;
+  color: var(--faint);
+  line-height: 1.4;
+}
+
+.segmented-group {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+.segmented-group button {
+  border: 1px solid var(--line);
+  background: var(--control);
+  color: var(--dim);
+  padding: 0.55rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.segmented-group button:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--bright);
+}
+
+.segmented-group button.active {
+  border-color: var(--line-strong);
+  background: var(--raised);
+  color: var(--bright);
+}
+
+.segmented-group button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.settings-divider {
+  margin: 1.5rem 0;
+  border: none;
+  border-top: 1px solid var(--line);
+}
+
+.theme-dropdown{
+  border: 1px solid var(--line);
+  background: var(--control);
+  color: var(--bright);
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  appearance: none;
+}
+
+.theme-dropdown select {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  width: 100%;
+}
+
+.settings-version{
+  font-size: 0.75rem;
+  color: var(--faint);
+  text-align: center;
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  background: var(--control);
+  
+  
+}
+
+.setting-error-badge{
+  display: inline-block;
+  width: fit-content;
+  position: absolute;
+  left: calc(100% + 0.45rem);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0.15rem 0.4rem;
+  border: 1px solid #a94444;
+  border-radius: 50px;
+  color: #ff8585;
+  background: #291416;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  cursor: help;
+}
+
+.setting-error-badge::after{
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  top: calc(100% + 0.45rem);
+  width: max-content;
+  max-width: min(min(26rem, 75vw), 26rem);
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--bright);
+  font-size: 0.72rem;
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-0.2rem);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.setting-error-badge:hover::after,
+.setting-error-badge:focus-visible::after{
+  opacity: 1;
+  transform: translateY(0);
+}
