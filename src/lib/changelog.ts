@@ -13,6 +13,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.6",
+    date: "2026-08-25",
+    changes: [
+      "Game-switch notifications now show as a small always-on-top overlay instead of only inside the app window — visible even while a game is fullscreen (OS notifications were skipped since most systems auto-suppress those during fullscreen games)",
+      "Settings → Game-switch overlay: choose which corner it appears in and how big it is, with a Test button to preview it",
+    ],
+  },
+  {
     version: "0.0.5",
     date: "2026-08-25",
     changes: [

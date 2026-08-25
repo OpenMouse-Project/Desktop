@@ -2,7 +2,6 @@ import { useEffect, useState } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import { BridgeView } from "./layouts/BridgeView";
 import { FullDesktopView } from "./layouts/FullDesktopView";
-import "./App.css";
 
 type AppMode = "bridge" | "full-desktop";
 const DISCORD_RPC_PREFERENCE = "openmouse.discord-rpc.enabled";

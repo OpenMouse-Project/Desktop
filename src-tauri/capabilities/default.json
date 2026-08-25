@@ -15,6 +15,7 @@
     "core:window:allow-toggle-maximize",
     "core:app:allow-version",
     "updater:default",
-    "process:default"
+    "process:default",
+    "core:event:allow-emit-to"
   ]
 }

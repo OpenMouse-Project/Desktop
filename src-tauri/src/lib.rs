@@ -151,6 +151,20 @@ pub fn run() {
                 resize_for_mode(&window, mode);
             }
 
+            // The overlay window (game-switch toasts — src/OverlayApp.tsx)
+            // starts invisible and gets shown/hidden/sized/positioned
+            // entirely from its own script (it reads the user's saved
+            // corner/size preference — lib/overlay-settings.ts, editable in
+            // Settings — and recomputes against the current monitor on
+            // every show, rather than a fixed position baked in once here).
+            // Click-through is the one thing that's the same regardless of
+            // preference, set once at startup: it can never block input to
+            // whatever's underneath, a passive HUD that doesn't compete
+            // with the game for clicks.
+            if let Some(overlay) = app.get_webview_window("overlay") {
+                let _ = overlay.set_ignore_cursor_events(true);
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {

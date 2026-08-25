@@ -1335,6 +1335,60 @@ button:focus-visible {
   background: var(--hover);
 }
 
+/* ---------- Overlay toast window (src/OverlayApp.tsx) ----------
+   Fills its own small, transparent, always-on-top window — sized/moved to
+   match the user's saved corner/size (lib/overlay-settings.ts) before
+   every show, so there's no fixed layout to fight; a small margin leaves
+   the box-shadow room to render instead of getting clipped at the window's
+   own edge. */
+
+.overlay-toast {
+  box-sizing: border-box;
+  margin: 6px;
+  width: calc(100% - 12px);
+  height: calc(100% - 12px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.85rem 1.05rem;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  border-left-width: 3px;
+  background: var(--raised);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  animation: toast-in 0.18s ease-out;
+}
+
+.overlay-toast-success { border-left-color: var(--success); }
+.overlay-toast-error { border-left-color: var(--warning); }
+.overlay-toast-info { border-left-color: var(--muted); }
+
+.overlay-toast-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--bright);
+}
+
+.overlay-toast-body {
+  font-size: 0.78rem;
+  color: var(--dim);
+  line-height: 1.4;
+}
+
+.overlay-settings-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+
+.overlay-settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
 .setting-row {
   display: flex;
   align-items: center;

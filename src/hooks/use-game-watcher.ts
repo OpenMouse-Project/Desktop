@@ -3,10 +3,13 @@
 // auto-applying/restoring a saved profile — keeps running no matter which
 // tab is showing. Games are usually played full-screen with this app tabbed
 // away, not sitting open on the Games page, so a poll that only ran while
-// GamesPage was mounted would never catch the moment that mattered. Owning
-// it here also means ToastHost (also mounted once, in FullDesktopView) can
-// actually show the apply/restore notifications below regardless of which
-// page the user is looking at.
+// GamesPage was mounted would never catch the moment that mattered.
+//
+// Every apply/restore fires BOTH the in-window toast (ToastHost, mounted
+// once in FullDesktopView — useless the moment this window isn't visible,
+// i.e. exactly while a game is actually running) AND the always-on-top
+// overlay toast (lib/overlay-toast.ts, its own separate window — see
+// OverlayApp.tsx) that's visible even then.
 
 import { useEffect, useRef, useState } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
@@ -19,6 +22,7 @@ import {
   type GameProfile,
 } from "../lib/game-profiles";
 import { showToast } from "../lib/toast";
+import { showOverlayToast } from "../lib/overlay-toast";
 
 export interface Game {
   id: string;
@@ -114,6 +118,14 @@ export function useGameWatcher(connection: MouseConnection) {
       return game.executables.some((exe) => names.has(exe.toLowerCase()));
     }
 
+    // Fires both notification surfaces together rather than duplicating
+    // the pair at every call site below — see the module docs on why both
+    // exist.
+    function notify(toastText: string, overlayTitle: string, overlayBody: string, kind: "success" | "error" | "info") {
+      showToast(toastText, kind);
+      void showOverlayToast({ title: overlayTitle, body: overlayBody, kind });
+    }
+
     async function applyOnLaunch(game: Game) {
       const profile = getGameProfile(game.id);
       if (!profile?.autoApply || !isProfileMeaningful(profile)) return;
@@ -141,9 +153,15 @@ export function useGameWatcher(connection: MouseConnection) {
         // something that never actually happened.
         activeOverrideRef.current = { gameId: game.id, gameName: game.name, restore };
         setActiveOverride({ gameId: game.id, gameName: game.name });
-        showToast(`Applied "${game.name}" profile — ${describeProfile(profile)}.`, "success");
+        notify(
+          `Applied "${game.name}" profile — ${describeProfile(profile)}.`,
+          `${game.name} profile applied`,
+          describeProfile(profile),
+          "success",
+        );
       } catch (error) {
-        showToast(`Couldn't apply "${game.name}" profile: ${error instanceof Error ? error.message : String(error)}`, "error");
+        const message = error instanceof Error ? error.message : String(error);
+        notify(`Couldn't apply "${game.name}" profile: ${message}`, `Couldn't apply ${game.name} profile`, message, "error");
       }
     }
 
@@ -162,9 +180,15 @@ export function useGameWatcher(connection: MouseConnection) {
 
       try {
         await applyGameProfile(connectedInfo, restoreProfile, patchStatus);
-        showToast(`${game.name} closed — restored your default ${describeProfile(restoreProfile)}.`, "info");
+        notify(
+          `${game.name} closed — restored your default ${describeProfile(restoreProfile)}.`,
+          `${game.name} closed`,
+          `Restored your default ${describeProfile(restoreProfile)}`,
+          "info",
+        );
       } catch (error) {
-        showToast(`Couldn't restore your default settings: ${error instanceof Error ? error.message : String(error)}`, "error");
+        const message = error instanceof Error ? error.message : String(error);
+        notify(`Couldn't restore your default settings: ${message}`, "Couldn't restore your defaults", message, "error");
       }
     }
 

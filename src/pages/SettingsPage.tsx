@@ -3,13 +3,23 @@ import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import type { Update } from "@tauri-apps/plugin-updater";
-import { FileDown, ScrollText } from "lucide-preact";
+import { Bell, FileDown, ScrollText } from "lucide-preact";
 import { ModeToggle } from "../components/ModeToggle";
 import { ResourceMonitor } from "../components/ResourceMonitor";
 import { ChangelogModal } from "../components/ChangelogModal";
 import { UpdateAvailableModal } from "../components/UpdateAvailableModal";
 import { showToast } from "../lib/toast";
 import { runUpdateCheck } from "../lib/update-check";
+import { showOverlayToast } from "../lib/overlay-toast";
+import {
+  CORNER_LABELS,
+  SIZE_LABELS,
+  getOverlaySettings,
+  saveOverlaySettings,
+  type OverlayCorner,
+  type OverlaySettings,
+  type OverlaySize,
+} from "../lib/overlay-settings";
 import { getVersion } from "@tauri-apps/api/app";
 import type { ResourceMonitorData } from "../hooks/use-resource-monitor";
 
@@ -35,6 +45,7 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
   const [showChangelog, setShowChangelog] = useState(false);
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [overlaySettings, setOverlaySettings] = useState<OverlaySettings>(() => getOverlaySettings());
 
   useEffect(() => {
     void getVersion().then(setVersion);
@@ -96,6 +107,23 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
       showToast(error instanceof Error ? error.message : String(error), "error");
       setInstallingUpdate(false);
     }
+  }
+
+  // OverlayApp.tsx re-reads this from localStorage on every show (both
+  // windows share the same origin) — a change here takes effect on the
+  // very next game-switch toast, no restart needed.
+  function updateOverlaySettings(patch: Partial<OverlaySettings>) {
+    const next = { ...overlaySettings, ...patch };
+    setOverlaySettings(next);
+    saveOverlaySettings(next);
+  }
+
+  function testOverlay() {
+    void showOverlayToast({
+      title: "Test notification",
+      body: "This is what a game-switch alert looks like.",
+      kind: "info",
+    });
   }
 
   async function toggleDiscordRpc(enabled: boolean) {
@@ -231,6 +259,48 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
         <button class="rescan-button" onClick={() => setShowChangelog(true)}>
           <ScrollText size={14} /> View
         </button>
+      </div>
+
+      <div class="setting-row setting-row-block">
+        <div class="setting-label">
+          <span class="setting-title">Game-switch overlay</span>
+          <span class="setting-description">
+            A small always-on-top notice when a game profile applies or restores — visible even while a game is fullscreen.
+          </span>
+        </div>
+        <div class="overlay-settings-controls">
+          <div class="overlay-settings-row">
+            <span class="setting-eyebrow">Position</span>
+            <div class="segmented-group">
+              {(Object.keys(CORNER_LABELS) as OverlayCorner[]).map((corner) => (
+                <button
+                  key={corner}
+                  class={corner === overlaySettings.corner ? "active" : ""}
+                  onClick={() => updateOverlaySettings({ corner })}
+                >
+                  {CORNER_LABELS[corner]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div class="overlay-settings-row">
+            <span class="setting-eyebrow">Size</span>
+            <div class="segmented-group">
+              {(Object.keys(SIZE_LABELS) as OverlaySize[]).map((size) => (
+                <button
+                  key={size}
+                  class={size === overlaySettings.size ? "active" : ""}
+                  onClick={() => updateOverlaySettings({ size })}
+                >
+                  {SIZE_LABELS[size]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button class="rescan-button" onClick={testOverlay}>
+            <Bell size={14} /> Test
+          </button>
+        </div>
       </div>
 
       <div class="setting-row">
