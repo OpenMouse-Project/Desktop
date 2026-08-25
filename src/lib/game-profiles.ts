@@ -19,7 +19,7 @@
 
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
-import { setDpi, setPollingRate } from "../native-hid/logitech-actions";
+import { withLogitechClient } from "../native-hid/logitech-actions";
 
 const STORAGE_KEY = "openmouse:game-profiles";
 
@@ -107,12 +107,15 @@ export function describeProfile(profile: GameProfile): string {
 }
 
 /**
- * Pushes every setting a profile actually overrides to the connected mouse,
- * one write at a time — same one-write-at-a-time shape as
- * DevicePerformanceTab's individual controls, just run back-to-back instead
- * of one per user click. Each setter already opens/closes its own
- * short-lived connection and is serialized by hid-open-lock.ts, so running
- * them in sequence (not in parallel) is what keeps this safe.
+ * Pushes every setting a profile actually overrides to the connected mouse
+ * within a SINGLE open()+resolveDeviceIndex() session (withLogitechClient),
+ * not one per field — DevicePerformanceTab's individual controls each pay
+ * that cost separately because they're independent user clicks with no
+ * reason to share a session, but a profile applying both DPI and polling
+ * rate at once has every reason to: paying open/resolve twice back-to-back
+ * roughly doubles how long a game launch takes to actually reach the mouse,
+ * and doubles the window for colliding with the background status
+ * auto-refresh's own hid-open-lock (use-mouse-connection.ts, every 5s).
  *
  * Applies every field independently rather than stopping at the first
  * failure — a mouse that rejects one setting (e.g. an unsupported polling
@@ -127,26 +130,28 @@ export async function applyGameProfile(
 ): Promise<void> {
   const errors: string[] = [];
 
-  async function run(label: string, action: () => Promise<void>) {
-    try {
-      await action();
-    } catch (error) {
-      errors.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+  await withLogitechClient(info, "applyGameProfile", async (client) => {
+    async function run(label: string, action: () => Promise<void>) {
+      try {
+        await action();
+      } catch (error) {
+        errors.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
-  }
 
-  if (profile.dpi !== undefined) {
-    await run("DPI", async () => {
-      const applied = await setDpi(info, profile.dpi!, profile.dpiY);
-      onApplied({ dpi: applied });
-    });
-  }
-  if (profile.pollingRateHz !== undefined) {
-    await run("Polling rate", async () => {
-      const applied = await setPollingRate(info, profile.pollingRateHz!);
-      onApplied({ pollingRateHz: applied });
-    });
-  }
+    if (profile.dpi !== undefined) {
+      await run("DPI", async () => {
+        const applied = await client.setDpi(profile.dpi!, profile.dpiY);
+        onApplied({ dpi: applied });
+      });
+    }
+    if (profile.pollingRateHz !== undefined) {
+      await run("Polling rate", async () => {
+        const applied = await client.setPollingRate(profile.pollingRateHz!);
+        onApplied({ pollingRateHz: applied });
+      });
+    }
+  });
 
   if (errors.length > 0) throw new Error(errors.join("; "));
 }

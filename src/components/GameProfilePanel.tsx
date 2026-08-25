@@ -1,5 +1,5 @@
-import { useState } from "preact/hooks";
-import { Save, Trash2, X, Zap } from "lucide-preact";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { Trash2, X, Zap } from "lucide-preact";
 import type { Game } from "../hooks/use-game-watcher";
 import type { MouseConnection } from "../hooks/use-mouse-connection";
 import {
@@ -29,6 +29,17 @@ interface Props {
  * different apps. Either field left at "Not set" means this profile doesn't
  * touch that setting when it's applied.
  *
+ * Every field persists to lib/game-profiles.ts as it's edited (see the
+ * effect below) rather than needing an explicit "Save" click — CONFIRMED
+ * the source of a real bug: closing this panel via the × or by clicking
+ * outside it never saved anything, so setting DPI/rate and flipping "Apply
+ * automatically" then just closing (the natural thing to do) silently
+ * discarded all of it. use-game-watcher.ts's launch check found no saved
+ * profile and quietly did nothing — no error anywhere, exactly matching
+ * "the game launching doesn't seem to change the mouse at all." Every other
+ * toggle in this app (Discord RPC, Mode) already applies on change, not on
+ * a separate save step; this now matches.
+ *
  * The polling-rate row only shows up once a controllable mouse is connected
  * — its valid values are whatever that specific device reports supporting,
  * not a fixed list this panel could guess at. DPI has no such dependency (a
@@ -44,8 +55,7 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
   const [dpiYInput, setDpiYInput] = useState(existing?.dpiY !== undefined ? String(existing.dpiY) : "");
   const [pollingRateHz, setPollingRateHz] = useState<number | undefined>(existing?.pollingRateHz);
   const [autoApply, setAutoApply] = useState(existing?.autoApply ?? false);
-  const [hasSavedProfile, setHasSavedProfile] = useState(existing !== undefined);
-  const [pending, setPending] = useState<"save" | "apply" | null>(null);
+  const [pending, setPending] = useState<"apply" | null>(null);
 
   function buildProfile(): GameProfile {
     const dpi = dpiInput.trim() === "" ? undefined : Math.round(Number(dpiInput));
@@ -58,11 +68,20 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
     };
   }
 
-  function handleSave() {
+  // Skip the very first run — there's nothing to persist yet that
+  // getGameProfile() didn't already have (this just mirrors `existing`
+  // back at itself), and doing it anyway would create an empty saved entry
+  // for every game the moment its panel is opened, whether or not anything
+  // was actually configured.
+  const firstRun = useRef(true);
+  useEffect(() => {
+    if (firstRun.current) {
+      firstRun.current = false;
+      return;
+    }
     saveGameProfile(game.id, buildProfile());
-    setHasSavedProfile(true);
-    showToast(`Saved profile for ${game.name}.`, "success");
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dpiInput, dpiYInput, pollingRateHz, autoApply]);
 
   async function handleApplyNow() {
     const profile = buildProfile();
@@ -84,13 +103,13 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
     setDpiYInput("");
     setPollingRateHz(undefined);
     setAutoApply(false);
-    setHasSavedProfile(false);
     showToast(`Cleared profile for ${game.name}.`, "info");
   }
 
   const busy = pending !== null;
   const draft = buildProfile();
   const canApplyNow = canControl && isProfileMeaningful(draft) && !busy;
+  const hasSavedProfile = isProfileMeaningful(draft) || autoApply;
 
   return (
     <div class="game-profile-overlay" onClick={onClose}>
@@ -211,6 +230,8 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
           </label>
         </div>
 
+        <p class="game-profile-hint">Changes save automatically.</p>
+
         <div class="game-profile-panel-footer">
           {hasSavedProfile && (
             <button class="rescan-button" onClick={handleClear} disabled={busy}>
@@ -219,9 +240,6 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
           )}
           <button class="rescan-button" onClick={() => void handleApplyNow()} disabled={!canApplyNow}>
             <Zap size={14} /> {pending === "apply" ? "Applying…" : "Apply now"}
-          </button>
-          <button class="connect-button" onClick={handleSave} disabled={busy}>
-            <Save size={14} /> Save profile
           </button>
         </div>
       </div>

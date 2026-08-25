@@ -54,7 +54,7 @@ export type GamingSurfaceMode = NonNullable<MouseStatus["gamingSurfaceMode"]>;
  * through `unknown` for the same reason on the read-only path. Doing it once
  * here, not per call site.
  */
-interface WritableLogitechClient {
+export interface WritableLogitechClient {
   open(): Promise<void>;
   close(): Promise<void>;
   /**
@@ -88,6 +88,18 @@ async function withClient<T>(
   // get its reply cross-matched with the other call's.
   return withHidOpenLock(info.key, () => withClientLocked(info, label, action));
 }
+
+/**
+ * Public version of `withClient`, for a caller that needs to run more than
+ * one action against a single open()+resolveDeviceIndex() session — e.g.
+ * lib/game-profiles.ts applying a profile's DPI and polling rate together.
+ * Calling `setDpi()` then `setPollingRate()` back-to-back would pay that
+ * open/resolve cost (up to RESOLVE_INDEX_TIMEOUT_MS for a receiver's own
+ * pairing-slot probe) twice and double the window for colliding with the
+ * background status auto-refresh's own hid-open-lock — noticeably worse
+ * for something meant to happen instantly the moment a game launches.
+ */
+export const withLogitechClient = withClient;
 
 async function withClientLocked<T>(
   info: HidInterfaceInfo,
