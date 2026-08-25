@@ -46,7 +46,7 @@ pub fn enable(state: State<DiscordRpcState>) -> Result<(), String> {
     applog!("[discord] IPC connection established");
 
     let (name, details) = if cfg!(debug_assertions) {
-        ("OpenMouse Dev", "Dev Mode")
+        ("OpenMouse Dev", concat!("Dev Mode: Build ", env!("CARGO_PKG_VERSION")))
     } else {
         ("OpenMouse", "OpenMouse Desktop")
     };
