@@ -49,3 +49,37 @@ export async function withHidOpenLock<T>(key: string, action: () => Promise<T>):
     openKeys.delete(key);
   }
 }
+
+/**
+ * Like `withHidOpenLock`, but retries on contention instead of failing on
+ * the first collision — for a caller where the write actually has to land,
+ * not just "try once, it's fine if a background tick beats it." CONFIRMED
+ * as a real problem, not theoretical: a game-profile write (logitech-actions.ts)
+ * landing in the same window as the status auto-refresh's background poll
+ * (use-mouse-connection.ts, every 5s) got rejected outright as "busy," and
+ * unlike that auto-refresh — which just tries again next tick regardless —
+ * a game launching is a one-shot moment nothing retries on its own.
+ *
+ * Retries every `intervalMs` until `action` succeeds or `timeoutMs`
+ * elapses; the auto-refresh's own walk is a handful of round trips (at
+ * most a couple seconds even on a receiver doing a full multi-split read),
+ * so a window a bit longer than its 5s interval is enough to guarantee
+ * landing between two ticks rather than racing the same one repeatedly.
+ */
+export async function withHidOpenLockRetrying<T>(
+  key: string,
+  action: () => Promise<T>,
+  opts: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<T> {
+  const timeoutMs = opts.timeoutMs ?? 8000;
+  const intervalMs = opts.intervalMs ?? 300;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      return await withHidOpenLock(key, action);
+    } catch (error) {
+      if (!isHidBusyError(error) || Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+}

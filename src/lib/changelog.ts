@@ -13,6 +13,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.4",
+    date: "2026-08-25",
+    changes: [
+      "Fixed: a game profile could fail to apply with \"this device is already busy\" if it landed at the same moment as the background status refresh — writes now retry for a few seconds instead of failing outright",
+    ],
+  },
+  {
     version: "0.0.3",
     date: "2026-08-25",
     changes: [

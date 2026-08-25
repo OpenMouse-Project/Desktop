@@ -18,7 +18,7 @@
 import { LogitechHidppClient } from "@openmouse/protocol/drivers/logitech/hidpp";
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import { TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
-import { withHidOpenLock } from "./hid-open-lock";
+import { withHidOpenLockRetrying } from "./hid-open-lock";
 
 const OPEN_TIMEOUT_MS = 10000;
 // resolveDeviceIndex() alone can cost as much as scan.ts's
@@ -86,7 +86,14 @@ async function withClient<T>(
   // write racing a concurrent status read (or another write) on the same
   // device would otherwise share hid_open's idempotent-per-device group and
   // get its reply cross-matched with the other call's.
-  return withHidOpenLock(info.key, () => withClientLocked(info, label, action));
+  //
+  // Retrying (not just a single attempt) — CONFIRMED necessary: a write
+  // landing in the same window as use-mouse-connection.ts's 5s background
+  // status refresh got rejected outright as "busy" instead of just waiting
+  // its turn. A manual click can be retried by the user; an automatic
+  // game-launch write can't, so this covers both rather than special-casing
+  // just the automatic path.
+  return withHidOpenLockRetrying(info.key, () => withClientLocked(info, label, action));
 }
 
 /**
