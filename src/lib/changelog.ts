@@ -13,6 +13,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.14",
+    date: "2026-08-25",
+    changes: [
+      "Fix: Windows build failure — a prior warning cleanup dropped two imports that macOS's compiler saw as unused but Windows-only code actually needs",
+      "Games: League of Legends/TFT card now crossfades between both covers instead of squeezing them into cropped half-width tiles",
+    ],
+  },
+  {
     version: "0.0.13",
     date: "2026-08-25",
     changes: [

@@ -60,8 +60,12 @@
 //! call — simpler and cheaper than a fresh instance per call, and (now that
 //! exclusive mode is off) has no bearing on the freeze either way.
 use std::collections::HashMap;
+#[cfg(target_os = "windows")]
+use std::collections::HashSet;
 use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "windows")]
+use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
