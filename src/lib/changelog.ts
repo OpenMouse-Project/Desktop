@@ -13,6 +13,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.10",
+    date: "2026-08-25",
+    changes: [
+      "Fixed: Razer Viper Mini (and other Razer mice) now connect on Windows — the HID feature report buffer was too small and the response was returning an extra report-ID byte that broke the protocol decode",
+    ],
+  },
+  {
     version: "0.0.9",
     date: "2026-08-25",
     changes: [
