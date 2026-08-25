@@ -33,7 +33,7 @@ export function TitleBar({ showMaximize = true }: Props) {
             class={`titlebar-badge ${updateAvailable ? "titlebar-badge-update" : ""}`}
             title={updateAvailable ? "An update is available — see Settings" : undefined}
           >
-            v{version} · Beta
+            v{version} · Alpha
           </span>
         )}
       </div>

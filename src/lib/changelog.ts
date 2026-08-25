@@ -13,7 +13,7 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: "0.1.0",
+    version: "0.0.1",
     date: "2026-08-24",
     changes: [
       "Device control: DPI presets and custom X/Y axes, polling rate, lift-off distance, gaming surface mode",
