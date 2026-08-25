@@ -13,6 +13,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.15",
+    date: "2026-08-25",
+    changes: [
+      "Fix: Windows build failure, round 2 — 0.0.14 fixed two of three imports the same warning cleanup had broken, missed a third (a `mut` also only needed by Windows-only code)",
+    ],
+  },
+  {
     version: "0.0.14",
     date: "2026-08-25",
     changes: [

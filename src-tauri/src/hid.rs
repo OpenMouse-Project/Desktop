@@ -494,7 +494,12 @@ pub fn hid_open(
     }
 
     let devices = with_hid_api(&api_handle, |api| {
-        let paths: Vec<String> = api
+        // `mut` looks unnecessary from a macOS build's perspective —
+        // pushed into only in the #[cfg(target_os = "windows")] block
+        // below, so Windows genuinely needs it mutable even though macOS
+        // can't see why.
+        #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
+        let mut paths: Vec<String> = api
             .device_list()
             .filter(|info| {
                 info.vendor_id() == vendor_id
