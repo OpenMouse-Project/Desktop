@@ -13,6 +13,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.2",
+    date: "2026-08-25",
+    changes: [
+      "Fixed: game profiles (DPI/polling rate) could silently fail to apply — the profile editor now saves as you edit instead of requiring a separate Save click",
+      "Applying a game profile now reaches the mouse faster and more reliably (DPI and polling rate share one connection instead of two)",
+    ],
+  },
+  {
     version: "0.0.1",
     date: "2026-08-24",
     changes: [
