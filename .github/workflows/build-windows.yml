@@ -36,6 +36,9 @@ jobs:
       # covers both halves.
       - name: Build
         run: npm run tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ""
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
 
       # tauri.conf.json's bundle.targets is "all", so on Windows this is
       # both an NSIS .exe and an .msi.
