@@ -189,6 +189,26 @@
 
 ---
 
+### Release v0.0.11 — UI Refactor, Game Scanner, Sidebar
+
+**~17:05 IST** — Commit `1b2123e`: "UI refactor: device dashboard, installed game scanner, sidebar navigation (v0.0.11)"
+
+- Bumped version 0.0.10 → 0.0.11 in `package.json`, `Cargo.toml`, `tauri.conf.json`
+- Updated `changelog.ts` with v0.0.11 entry (6 changes)
+- Created backup tag `v0.0.10-backup` and branch `backup/v0.0.10` before release
+
+#### CI Fixes
+
+**~17:15 IST** — `build-windows.yml` was failing on every push because `tauri build` requires `TAURI_SIGNING_PRIVATE_KEY` (only available in release workflow). Fixed by switching to `cargo build --release` + `npm run build` for the sanity check — no bundler/signing needed.
+
+#### Release
+
+**17:09 IST** — Tag `v0.0.11` pushed, release workflow triggered and passed (3m40s).
+- Release: https://github.com/OpenMouse-Project/Desktop/releases/tag/v0.0.11
+- Assets: `.exe` installer, `.msi` installer, `.sig` files, `latest.json`
+
+---
+
 ## Key Technical Notes
 
 ### Game Scanner
