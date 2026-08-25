@@ -34,6 +34,15 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkzNDUwMEY2ODUxMkU4RDgKUldUWTZCS0Y5Z0JGazNDZyt2K0E2K2JxVDdsRUpBOTdueWpEaTZZTzZCM1crTXBiWllLcEdYSkcK",
+      "endpoints": [
+        "https://github.com/OpenMouse-Project/Desktop/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

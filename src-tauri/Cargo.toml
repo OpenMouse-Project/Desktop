@@ -26,4 +26,6 @@ hidapi = "2.6.6"
 anyhow = "1.0"
 discord-rich-presence = "1.1.0"
 sysinfo = "0.39.6"
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-process = "2.3.1"
 

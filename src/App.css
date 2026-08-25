@@ -99,6 +99,23 @@ button:focus-visible {
   border-radius: 999px;
   padding: 0.1rem 0.5rem;
   white-space: nowrap;
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+
+.titlebar-badge-update {
+  color: var(--success);
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 16%, var(--control));
+  animation: titlebar-badge-update-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes titlebar-badge-update-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 6px 1px color-mix(in srgb, var(--success) 45%, transparent);
+  }
 }
 
 .titlebar-drag {
@@ -719,6 +736,95 @@ button:focus-visible {
 .chip-clear:hover {
   color: var(--dim);
   border-color: var(--line-strong);
+}
+
+/* ---------- Generic modal (Changelog; game-profile-overlay/panel above is
+   the same shape but scoped to that one feature) ---------- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(9, 9, 11, 0.6);
+  backdrop-filter: blur(2px);
+  padding: 1.5rem;
+  z-index: 50;
+}
+
+.modal-panel {
+  width: 100%;
+  max-width: 420px;
+  max-height: min(560px, 100%);
+  overflow-y: auto;
+  scrollbar-width: none;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  padding: 1.5rem;
+}
+
+.modal-panel::-webkit-scrollbar {
+  display: none;
+}
+
+.modal-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.modal-panel-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--bright);
+}
+
+.changelog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.changelog-entry-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.changelog-version {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--bright);
+}
+
+.changelog-date {
+  font-size: 0.72rem;
+  color: var(--faint);
+}
+
+.changelog-entry ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.changelog-entry li {
+  font-size: 0.8rem;
+  color: var(--dim);
+  line-height: 1.4;
+}
+
+.changelog-entry + .changelog-entry {
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
 }
 
 /* The polling-rate row (setting-row-block, GameProfilePanel) reuses

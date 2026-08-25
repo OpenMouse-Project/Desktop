@@ -1,0 +1,58 @@
+name: Release
+
+# Publishes a signed, auto-update-ready GitHub Release — separate from
+# build-windows.yml, which just sanity-checks that every push to main still
+# compiles. This is the one that actually feeds tauri.conf.json's updater
+# endpoint (github.com/OpenMouse-Project/Desktop/releases/latest/download/latest.json):
+# tauri-action signs the installers with TAURI_SIGNING_PRIVATE_KEY (repo
+# secret; the matching pubkey is what's baked into tauri.conf.json) and
+# generates that latest.json alongside them.
+#
+# `releases/latest` only ever resolves to the newest NON-prerelease,
+# non-draft release — so this deliberately publishes as a real release
+# (prerelease: false), even though the app's own titlebar still says
+# "Beta." Those are unrelated: one's a GitHub API flag the updater endpoint
+# depends on, the other's just a UI label.
+#
+# Bump tauri.conf.json's `version` before running this — tauri-action reads
+# it to name both the release and its tag.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "OpenMouse Desktop v__VERSION__"
+          releaseBody: "See Settings → Changelog in the app for details."
+          releaseDraft: false
+          prerelease: false

@@ -1,10 +1,13 @@
 import { useEffect, useState } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { FileDown } from "lucide-preact";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { FileDown, ScrollText } from "lucide-preact";
 import { ModeToggle } from "../components/ModeToggle";
 import { ResourceMonitor } from "../components/ResourceMonitor";
+import { ChangelogModal } from "../components/ChangelogModal";
 import { showToast } from "../lib/toast";
+import { runUpdateCheck } from "../lib/update-check";
 import { getVersion } from "@tauri-apps/api/app";
 import type { ResourceMonitorData } from "../hooks/use-resource-monitor";
 
@@ -27,6 +30,7 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
     () => localStorage.getItem(DISCORD_RPC_PREFERENCE) === "true",
   );
   const [discordError, setDiscordError] = useState("");
+  const [showChangelog, setShowChangelog] = useState(false);
 
   useEffect(() => {
     void getVersion().then(setVersion);
@@ -50,10 +54,24 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
     }
   }
 
+  // Reuses lib/update-check.ts's shared check (also driving the TitleBar
+  // pill and the 30-minute background poll) rather than calling the plugin
+  // directly, so a manual click here doesn't run a second, disconnected
+  // check that could disagree with what the pill is showing.
   async function checkForUpdates() {
     setCheckingForUpdates(true);
     try {
-      await invoke("check_for_updates");
+      const update = await runUpdateCheck();
+      if (!update) {
+        showToast("You're up to date.", "info");
+        return;
+      }
+      showToast(`Downloading v${update.version}…`, "info");
+      await update.downloadAndInstall();
+      showToast("Update installed — restarting…", "success");
+      await relaunch();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "error");
     } finally {
       setCheckingForUpdates(false);
     }
@@ -179,7 +197,19 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
         <button class="rescan-button" onClick={() => void checkForUpdates()} disabled={checkingForUpdates}>
           {checkingForUpdates ? "Checking..." : "Check Now"}
         </button>
-        
+
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          <span class="setting-title">Changelog</span>
+          <span class="setting-description">
+            What's changed in each version.
+          </span>
+        </div>
+        <button class="rescan-button" onClick={() => setShowChangelog(true)}>
+          <ScrollText size={14} /> View
+        </button>
       </div>
 
       <div class="setting-row">
@@ -205,6 +235,8 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
           <ResourceMonitor data={resourceMonitor} />
         </div>
       )}
+
+      {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} />}
     </section>
   );
 }
