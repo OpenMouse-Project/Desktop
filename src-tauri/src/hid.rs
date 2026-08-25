@@ -174,6 +174,15 @@ fn with_hid_api<T>(
             // whose protocol needs exclusive access is a documented gap
             // (see brands.ts), not something to solve by reintroducing the
             // freeze.
+            //
+            // `set_open_exclusive` only exists on Darwin (hidapi-rs gates it
+            // behind `#[cfg(target_os = "macos")]` — CONFIRMED by reading
+            // its own doc comment: "By default on Darwin platform all
+            // devices ... are opened in exclusive mode"). Windows/Linux
+            // don't share that exclusive-by-default behavior in the first
+            // place, so there's nothing here to turn off on those
+            // platforms.
+            #[cfg(target_os = "macos")]
             api.set_open_exclusive(false);
             *guard = Some(api);
         }
