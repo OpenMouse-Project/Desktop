@@ -35,18 +35,11 @@ jobs:
       # (tsc + vite) before the Rust side compiles — this one command
       # covers both halves.
       - name: Build
-        run: npm run tauri build
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ""
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: npx tauri build --bundles none
 
-      # tauri.conf.json's bundle.targets is "all", so on Windows this is
-      # both an NSIS .exe and an .msi.
-      - name: Upload installers
+      - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: openmouse-desktop-windows
-          path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.msi
+          path: src-tauri/target/release/openmouse-desktop.exe
           if-no-files-found: error
