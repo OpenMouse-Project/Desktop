@@ -13,6 +13,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.11",
+    date: "2026-08-25",
+    changes: [
+      "New: compact icon sidebar replaces the top header — Overview and Games are one click away, Settings and Update at the bottom",
+      "New: installed game scanner — detects Steam and Epic Games Store installs automatically, shows installed games first with a badge",
+      "Overview rewrite — large device showcase, capability-driven tab bar (Overview/Performance/Lighting/Profiles/Buttons), live status and info grids",
+      "Game cards now highlight green on hover, grid is responsive and fills left-to-right",
+      "Discord Rich Presence now shows 'Dev Mode' indicator during development builds",
+      "Performance tab is read-only when a game profile is active (prevents accidental edits during gameplay)",
+    ],
+  },
+  {
     version: "0.0.10",
     date: "2026-08-25",
     changes: [

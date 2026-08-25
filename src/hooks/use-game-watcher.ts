@@ -31,6 +31,7 @@ export interface Game {
   steamAppId?: number;
   artworkFallback?: string;
   executables: string[];
+  installed?: boolean;
 }
 
 interface GamesFile {
@@ -103,8 +104,32 @@ export function useGameWatcher(connection: MouseConnection) {
           throw new Error(`Could not load games (${response.status})`);
         }
         const data = (await response.json()) as GamesFile;
-        gamesRef.current = data.games;
-        setList({ status: "loaded", games: data.games });
+
+        // Collect Steam AppIDs from the known games list
+        const knownSteamIds = data.games
+          .filter((g) => g.steamAppId)
+          .map((g) => Number(g.steamAppId));
+
+        // Scan system for installed games via Steam/Epic
+        const scanResult = await invoke<{
+          installed_steam_ids: number[];
+        }>("scan_installed_games", { knownSteamIds });
+
+        const installedSet = new Set(scanResult.installed_steam_ids);
+        const gamesWithInstallStatus = data.games.map((game) => ({
+          ...game,
+          installed: game.steamAppId
+            ? installedSet.has(Number(game.steamAppId))
+            : false,
+        }));
+
+        // Installed games first, then not-installed
+        const installed = gamesWithInstallStatus.filter((g) => g.installed);
+        const notInstalled = gamesWithInstallStatus.filter((g) => !g.installed);
+        const allGames = [...installed, ...notInstalled];
+
+        gamesRef.current = allGames;
+        setList({ status: "loaded", games: allGames });
       })
       .catch((reason: unknown) => {
         setList({ status: "error", message: reason instanceof Error ? reason.message : String(reason) });

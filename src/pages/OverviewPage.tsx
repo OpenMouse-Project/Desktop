@@ -1,16 +1,23 @@
 import { useEffect, useState } from "preact/hooks";
-import { ArrowLeft, Battery, Gamepad2, Info, RefreshCw, SlidersHorizontal, Usb } from "lucide-preact";
+import { Battery, Gamepad2, Info, RefreshCw, SlidersHorizontal, Lightbulb, Layers, MousePointerClick, Usb } from "lucide-preact";
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import type { MouseConnection } from "../hooks/use-mouse-connection";
 import type { ActiveGameOverride } from "../hooks/use-game-watcher";
 import { deviceImage, UNKNOWN_DEVICE_IMAGE } from "../native-hid/device-images";
 import { DevicePerformanceTab } from "../components/DevicePerformanceTab";
 
-/** Swaps a broken/missing product photo for the generic fallback, once. */
 function fallbackToUnknownDevice(event: Event) {
   const img = event.currentTarget as HTMLImageElement;
   if (img.src.endsWith(UNKNOWN_DEVICE_IMAGE)) return;
   img.src = UNKNOWN_DEVICE_IMAGE;
+}
+
+type DeviceTab = "overview" | "performance" | "lighting" | "profiles" | "buttons";
+
+interface TabDef {
+  id: DeviceTab;
+  icon: typeof SlidersHorizontal;
+  label: string;
 }
 
 interface DetailRow {
@@ -19,18 +26,8 @@ interface DetailRow {
   mono?: boolean;
 }
 
-/**
- * Everything `readStatus()` returned beyond the three headline stats
- * (DPI/rate/battery, shown in the grid above the tabs), filtered down to
- * whatever this particular brand/model actually populated — most of
- * `MouseStatus`'s fields are brand-specific and undefined everywhere else.
- * Lives under the Information tab, out of the way of the always-visible
- * stats — firmware included, since it's rarely what someone connects to
- * check first.
- */
-function detailRows(status: MouseStatus): DetailRow[] {
+function statusDetailRows(status: MouseStatus): DetailRow[] {
   const rows: DetailRow[] = [];
-
   if (status.firmware.length > 0) {
     rows.push({ label: "Firmware", value: status.firmware.join(" · "), mono: status.firmware.length === 1 });
   }
@@ -42,20 +39,9 @@ function detailRows(status: MouseStatus): DetailRow[] {
         : status.connectionType,
     });
   }
-  if (status.liftOffDistance) {
-    rows.push({
-      label: "Lift-off distance",
-      value: status.supportedLiftOffDistances?.length
-        ? `${status.liftOffDistance} (of ${status.supportedLiftOffDistances.join("/")})`
-        : status.liftOffDistance,
-    });
-  }
-  if (status.deviceMode) {
-    rows.push({ label: "Device mode", value: status.deviceMode });
-  }
   if (status.activeProfile !== null && status.activeProfile !== undefined) {
     rows.push({
-      label: "Active profile",
+      label: "Profile",
       value: status.onboardProfileFormat?.name
         ? `${status.activeProfile} (${status.onboardProfileFormat.name})`
         : String(status.activeProfile),
@@ -69,15 +55,6 @@ function detailRows(status: MouseStatus): DetailRow[] {
         : `— of ${status.hostCount}`,
     });
   }
-  if (status.supportedPollingRates?.length) {
-    rows.push({ label: "Supported rates", value: status.supportedPollingRates.map((hz) => `${hz} Hz`).join(", ") });
-  }
-  if (status.supportsSeparateDpiAxes && status.dpiY !== undefined && status.dpiY !== status.dpi) {
-    rows.push({ label: "DPI (X × Y)", value: `${status.dpi} × ${status.dpiY}` });
-  }
-  if (status.primaryButton) {
-    rows.push({ label: "Primary button", value: status.primaryButton });
-  }
   if (status.friendlyName) {
     rows.push({ label: "Friendly name", value: status.friendlyName });
   }
@@ -87,17 +64,13 @@ function detailRows(status: MouseStatus): DetailRow[] {
   if (status.unitId) {
     rows.push({ label: "Unit ID", value: status.unitId, mono: true });
   }
-
   return rows;
 }
 
 interface Props {
   connection: MouseConnection;
-  /** Set while a game's profile has taken over the mouse's live settings — see use-game-watcher.ts. */
   activeGameOverride?: ActiveGameOverride | null;
 }
-
-type DeviceTab = "information" | "performance";
 
 export function OverviewPage({ connection, activeGameOverride }: Props) {
   const {
@@ -108,137 +81,204 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
     connectingKey,
     select,
     refresh,
-    back,
     patchStatus,
     setAutoRefreshPaused,
   } = connection;
-  const [deviceTab, setDeviceTab] = useState<DeviceTab>("performance");
+  const [deviceTab, setDeviceTab] = useState<DeviceTab>("overview");
 
-  // A tab choice belongs to whichever device is showing — land back on
-  // Performance rather than leaving it selected (and possibly hidden, for a
-  // brand without write support) after switching devices.
   useEffect(() => {
-    setDeviceTab("performance");
+    setDeviceTab("overview");
   }, [connected?.key]);
 
-  // The background auto-refresh (use-mouse-connection.ts, every 5s) is a
-  // full reconnect — CONFIRMED disruptive when it landed mid-edit on the
-  // Performance tab (a visible "looking up the mouse" while clicking
-  // through DPI/rate/surface controls). Pause it for as long as this tab is
-  // open; Information is read-only, nothing there minds a background sync.
   useEffect(() => {
     setAutoRefreshPaused(deviceTab === "performance");
     return () => setAutoRefreshPaused(false);
   }, [deviceTab, setAutoRefreshPaused]);
 
+  // ── Connected device dashboard ──────────────────────────────────────
   if (view === "device" && connected) {
     const { status } = connected;
-    // Write actions only exist for Logitech so far (native-hid/logitech-actions.ts)
-    // — other brands get an Information-only card until their own tab exists.
     const canControl = connected.brand === "Logitech" && connectedInfo !== null;
-    const rows = detailRows(status);
+    const infoRows = statusDetailRows(status);
+
+    // Capability-driven tab list
+    const tabs: TabDef[] = [{ id: "overview", icon: Info, label: "Overview" }];
+
+    const hasPerformance = status.dpi > 0 ||
+      (status.supportedPollingRates && status.supportedPollingRates.length > 0) ||
+      status.liftOffDistance != null ||
+      status.gamingSurfaceMode != null;
+    if (hasPerformance) tabs.push({ id: "performance", icon: SlidersHorizontal, label: "Performance" });
+
+    if (status.lighting || (status.lightingZones && status.lightingZones.length > 0)) {
+      tabs.push({ id: "lighting", icon: Lightbulb, label: "Lighting" });
+    }
+
+    if (status.activeProfile !== null && status.activeProfile !== undefined) {
+      tabs.push({ id: "profiles", icon: Layers, label: "Profiles" });
+    }
+
+    if (status.razerButtonMappings || status.eggButtonMappings || status.analogButtonTuning) {
+      tabs.push({ id: "buttons", icon: MousePointerClick, label: "Buttons" });
+    }
+
     return (
       <section class="page page-overview">
-        <div class="device-card">
-          <div class="device-card-header">
-            <img
-              class="device-card-image"
-              src={deviceImage(connected.key, status.name)}
-              onError={fallbackToUnknownDevice}
-              alt=""
-            />
-            <div>
-              <h2>{status.name}</h2>
-              <p class="device-card-brand">{connected.brand}</p>
-            </div>
-            <button class="rescan-button" onClick={back} title="Back to device list">
-              <ArrowLeft size={14} /> Back
+        {/* Device feature tab bar */}
+        <nav class="device-tabs-bar">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              class={`device-tab-pill ${deviceTab === tab.id ? "active" : ""}`}
+              onClick={() => setDeviceTab(tab.id)}
+            >
+              <tab.icon size={13} aria-hidden="true" /> {tab.label}
             </button>
-          </div>
+          ))}
+        </nav>
 
-          {activeGameOverride && (
-            <div class="profile-override-banner">
-              <Gamepad2 size={14} aria-hidden="true" />
-              <span>
-                <strong>{activeGameOverride.gameName}</strong> profile is active — DPI and polling rate are controlled by the game. Your defaults return when it closes.
-              </span>
-            </div>
-          )}
+        {/* ── Overview tab ───────────────────────────────────────── */}
+        {deviceTab === "overview" && (
+          <>
+            {/* Game Override Banner */}
+            {activeGameOverride && (
+              <div class="profile-override-banner">
+                <Gamepad2 size={14} aria-hidden="true" />
+                <span>
+                  <strong>{activeGameOverride.gameName}</strong> profile is active — DPI and polling rate are controlled by the game. Your defaults return when it closes.
+                </span>
+              </div>
+            )}
 
-          <div class="device-stat-grid">
-            <div class="device-stat">
-              <span class="device-stat-label">DPI</span>
-              <span class="device-stat-value">{status.dpi}</span>
+            {/* Device Showcase */}
+            <div class="device-showcase">
+              <h1 class="device-showcase-name">{status.name}</h1>
+              <p class="device-showcase-brand">{connected.brand}</p>
+              <div class="device-showcase-visual">
+                <img
+                  class="device-showcase-image"
+                  src={deviceImage(connected.key, status.name)}
+                  onError={fallbackToUnknownDevice}
+                  alt={status.name}
+                />
+              </div>
+              <div class="device-showcase-status">
+                <span class="device-showcase-dot" aria-hidden="true" />
+                Connected
+                {status.connectionType && (
+                  <span class="device-showcase-status-detail">· {status.connectionType}</span>
+                )}
+                <span class="device-showcase-status-detail">· <Battery size={14} class="device-showcase-battery-icon" /> Battery {status.batteryPercent !== null ? `${status.batteryPercent}%` : "N/A"}</span>
+              </div>
             </div>
-            <div class="device-stat">
-              <span class="device-stat-label">Polling rate</span>
-              <span class="device-stat-value">{status.pollingRateHz} Hz</span>
-            </div>
-            <div class="device-stat">
-              <span class="device-stat-label">
-                <Battery size={12} aria-hidden="true" /> Battery
-              </span>
-              <span class="device-stat-value">
-                {status.batteryPercent !== null ? `${status.batteryPercent}%` : "—"}
-              </span>
-              {status.batteryPercent !== null && status.batteryState !== "Unknown" && (
-                <span class="device-stat-sub">{status.batteryState}</span>
-              )}
-            </div>
-          </div>
 
-          {canControl && (
-            <nav class="device-tabs">
-              <button
-                class={deviceTab === "performance" ? "active" : ""}
-                onClick={() => setDeviceTab("performance")}
-              >
-                <SlidersHorizontal size={13} aria-hidden="true" /> Performance
-              </button>
-              <button
-                class={deviceTab === "information" ? "active" : ""}
-                onClick={() => setDeviceTab("information")}
-              >
-                <Info size={13} aria-hidden="true" /> Information
-              </button>
-            </nav>
-          )}
-
-          {(!canControl || deviceTab === "information") && rows.length > 0 && (
-            <div class="device-detail-list">
-              {rows.map((row) => (
-                <div class="device-detail-row" key={row.label}>
-                  <span class="device-detail-label">{row.label}</span>
-                  <span class={`device-detail-value ${row.mono ? "device-detail-value-mono" : ""}`}>
-                    {row.value}
+            {/* Current Status */}
+            <div class="info-section">
+              <span class="info-section-title">Current Status</span>
+              <div class="info-grid">
+                <div class="info-row">
+                  <span class="info-label">DPI</span>
+                  <span class="info-value">{status.dpi.toLocaleString()}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Polling Rate</span>
+                  <span class="info-value">{status.pollingRateHz} Hz</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Profile</span>
+                  <span class="info-value">
+                    {status.activeProfile !== null && status.activeProfile !== undefined
+                      ? status.onboardProfileFormat?.name ?? `Profile ${status.activeProfile}`
+                      : "Default"}
                   </span>
                 </div>
-              ))}
+                <div class="info-row">
+                  <span class="info-label"><Battery size={11} aria-hidden="true" /> Battery</span>
+                  <span class="info-value">
+                    {status.batteryPercent !== null ? `${status.batteryPercent}%` : "N/A"}
+                    {status.batteryPercent !== null && status.batteryState !== "Unknown" && (
+                      <span class="info-value-sub"> {status.batteryState}</span>
+                    )}
+                  </span>
+                </div>
+                {status.connectionType && (
+                  <div class="info-row">
+                    <span class="info-label">Connection</span>
+                    <span class="info-value">
+                      {status.connectionDetail
+                        ? `${status.connectionType} (${status.connectionDetail})`
+                        : status.connectionType}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
 
-          {canControl && deviceTab === "performance" && connectedInfo && (
-            <DevicePerformanceTab
-              info={connectedInfo}
-              status={status}
-              onApplied={patchStatus}
-              lockedBy={activeGameOverride?.gameName}
-            />
-          )}
-        </div>
+            {/* Device Information */}
+            {infoRows.length > 0 && (
+              <div class="info-section">
+                <span class="info-section-title">Device Information</span>
+                <div class="info-grid">
+                  <div class="info-row">
+                    <span class="info-label">Manufacturer</span>
+                    <span class="info-value">{connected.brand}</span>
+                  </div>
+                  {infoRows.map((row) => (
+                    <div class="info-row" key={row.label}>
+                      <span class="info-label">{row.label}</span>
+                      <span class={`info-value ${row.mono ? "info-value-mono" : ""}`}>{row.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Performance tab ─────────────────────────────────────── */}
+        {deviceTab === "performance" && connectedInfo && (
+          <DevicePerformanceTab
+            info={connectedInfo}
+            status={status}
+            onApplied={patchStatus}
+            lockedBy={activeGameOverride?.gameName}
+            readOnly={!canControl}
+          />
+        )}
+
+        {/* ── Lighting tab (placeholder) ──────────────────────────── */}
+        {deviceTab === "lighting" && (
+          <div class="tab-placeholder">
+            <Lightbulb size={32} aria-hidden="true" />
+            <h2>Lighting</h2>
+            <p>Lighting controls coming soon for this device.</p>
+          </div>
+        )}
+
+        {/* ── Profiles tab (placeholder) ──────────────────────────── */}
+        {deviceTab === "profiles" && (
+          <div class="tab-placeholder">
+            <Layers size={32} aria-hidden="true" />
+            <h2>Profiles</h2>
+            <p>Profile management coming soon for this device.</p>
+          </div>
+        )}
+
+        {/* ── Buttons tab (placeholder) ───────────────────────────── */}
+        {deviceTab === "buttons" && (
+          <div class="tab-placeholder">
+            <MousePointerClick size={32} aria-hidden="true" />
+            <h2>Buttons</h2>
+            <p>Button configuration coming soon for this device.</p>
+          </div>
+        )}
       </section>
     );
   }
 
+  // ── Device list / empty state ───────────────────────────────────────
   return (
     <section class="page page-overview">
-      <div class="device-list-header">
-        <h1 class="page-title">Devices</h1>
-        <button class="rescan-button" onClick={() => void refresh()} disabled={list.status === "loading"}>
-          <RefreshCw size={14} class={list.status === "loading" ? "spin" : ""} /> Refresh
-        </button>
-      </div>
-
       {list.status === "error" && (
         <div class="empty-state">
           <h2>Couldn't list HID devices</h2>
@@ -247,48 +287,66 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
       )}
 
       {list.status === "loaded" && list.candidates.length === 0 && (
-        <div class="empty-state">
-          <Usb class="empty-state-icon" size={40} aria-hidden="true" />
-          <h2>No supported devices found</h2>
-          <p>Connect a supported mouse over USB or a receiver, then refresh.</p>
+        <div class="overview-empty">
+          <div class="overview-empty-icon">
+            <Usb size={40} aria-hidden="true" />
+          </div>
+          <h2>No device connected</h2>
+          <p>Connect a supported OpenMouse device to begin configuring it.</p>
+          <button class="rescan-button rescan-button-standalone" onClick={() => void refresh()}>
+            <RefreshCw size={14} /> Refresh Devices
+          </button>
+        </div>
+      )}
+
+      {list.status === "loading" && (
+        <div class="overview-empty">
+          <div class="overview-empty-icon">
+            <RefreshCw size={40} class="spin" aria-hidden="true" />
+          </div>
+          <h2>Searching for devices</h2>
+          <p>Looking for supported mice…</p>
         </div>
       )}
 
       {list.status === "loaded" && list.candidates.length > 0 && (
-        <ul class="device-list">
-          {list.candidates.map((candidate) => (
-            <li class="device-list-row" key={candidate.info.key}>
-              <div class="device-list-row-main">
-                <img
-                  class="device-list-row-image"
-                  src={deviceImage(candidate.info.key, candidate.info.productString)}
-                  onError={fallbackToUnknownDevice}
-                  alt=""
-                />
-                <div class="device-list-row-info">
-                  <span class="device-list-row-name">
-                    {candidate.info.productString || "Unknown device"}
-                  </span>
-                  <span class="device-list-row-meta">
-                    {candidate.brands.join(" / ")} · {candidate.info.vendorId.toString(16).padStart(4, "0")}:
-                    {candidate.info.productId.toString(16).padStart(4, "0")}
-                  </span>
+        <>
+          <h1 class="page-title">Devices</h1>
+          <ul class="device-list">
+            {list.candidates.map((candidate) => (
+              <li class="device-list-row" key={candidate.info.key}>
+                <div class="device-list-row-main">
+                  <img
+                    class="device-list-row-image"
+                    src={deviceImage(candidate.info.key, candidate.info.productString)}
+                    onError={fallbackToUnknownDevice}
+                    alt=""
+                  />
+                  <div class="device-list-row-info">
+                    <span class="device-list-row-name">
+                      {candidate.info.productString || "Unknown device"}
+                    </span>
+                    <span class="device-list-row-meta">
+                      {candidate.brands.join(" / ")} · {candidate.info.vendorId.toString(16).padStart(4, "0")}:
+                      {candidate.info.productId.toString(16).padStart(4, "0")}
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <button
-                class="connect-button"
-                disabled={connectingKey === candidate.info.key}
-                onClick={() => select(candidate)}
-              >
-                {connectingKey === candidate.info.key
-                  ? "Connecting…"
-                  : connected?.key === candidate.info.key
-                    ? "View"
-                    : "Connect"}
-              </button>
-            </li>
-          ))}
-        </ul>
+                <button
+                  class="connect-button"
+                  disabled={connectingKey === candidate.info.key}
+                  onClick={() => select(candidate)}
+                >
+                  {connectingKey === candidate.info.key
+                    ? "Connecting…"
+                    : connected?.key === candidate.info.key
+                      ? "View"
+                      : "Connect"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </section>
   );

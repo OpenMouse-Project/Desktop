@@ -98,6 +98,7 @@ pub fn run() {
             applog::get_logs,
             applog::export_logs,
             games::running_process_names,
+            games::scan_installed_games,
             resource_monitor::sample_resource_usage,
         ])
         .setup(|app| {

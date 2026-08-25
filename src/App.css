@@ -93,7 +93,7 @@ button:focus-visible {
 
 .titlebar-badge {
   font-size: 0.65rem;
-  color: var(--faint);
+  color: var(--bright);
   background: var(--control);
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -267,132 +267,85 @@ button:focus-visible {
   overflow: hidden;
 }
 
-.sidebar {
-  width: 220px;
+/* ---------- App Sidebar (icon navigation + device indicator) ---------- */
+
+.app-sidebar {
+  width: 56px;
   flex-shrink: 0;
   background: var(--sidebar);
   border-right: 1px solid var(--line);
-  padding: 1.25rem 1rem;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
-}
-
-.sidebar-brand {
-  display: flex;
   align-items: center;
-  gap: 0.5rem;
+  padding: 0.75rem 0;
 }
 
-.sidebar-device {
+.app-sidebar-top {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.65rem;
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0.75rem;
-  background: var(--card);
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  gap: 1rem;
+  flex: 1;
 }
 
-.sidebar-device:hover {
-  background: var(--hover);
-  border-color: var(--line-strong);
-}
-
-.sidebar-device-icon {
-  position: relative;
+.app-sidebar-brand {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--raised);
-  color: var(--dim);
-  /* No overflow:hidden here — the status dot below is deliberately
-     positioned to overflow this box's corner, and a clipping parent cut it
-     off into a weird partial-circle. Round/clip the photo itself instead
-     (a sibling, not this box) so the dot stays a clean full circle. */
+  padding: 0.25rem 0;
 }
 
-.sidebar-device-photo {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  padding: 3px;
-  border-radius: 8px;
-  overflow: hidden;
+.app-sidebar-brand .brand-mark {
+  height: 1.1rem;
+  width: auto;
+  opacity: 0.7;
 }
 
-.sidebar-device-dot {
-  position: absolute;
-  right: -2px;
-  bottom: -2px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--success, #3ecf6a);
-  border: 2px solid var(--card);
-}
-
-.sidebar-device-info {
+.app-sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
-  min-width: 0;
+  align-items: center;
+  gap: 0.25rem;
 }
 
-.sidebar-device-name {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--bright);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sidebar-device-brand {
-  font-size: 0.72rem;
-  color: var(--faint);
-}
-
-.sidebar-empty {
-  border: 1px dashed var(--line);
-  border-radius: 10px;
-  padding: 1rem;
-}
-
-.sidebar-empty-title {
-  margin: 0 0 0.25rem;
-  font-size: 0.85rem;
-  color: var(--dim);
-}
-
-.sidebar-empty-hint {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--faint);
-  line-height: 1.4;
-}
-
-.full-desktop-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.app-header {
+.app-sidebar-nav-item {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
-  padding: 0.85rem 1.5rem;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.app-sidebar-nav-item:hover {
+  background: var(--hover);
+  color: var(--bright);
+}
+
+.app-sidebar-nav-item.active {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.app-sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+/* ---------- App Header (contextual status only) ---------- */
+
+.app-header-bar {
+  display: flex;
+  align-items: center;
+  padding: 0.6rem 1.5rem;
   border-bottom: 1px solid var(--line);
   background: var(--card);
 }
@@ -402,61 +355,262 @@ button:focus-visible {
   gap: 1.25rem;
 }
 
-.status-chip {
+.header-status-chip {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
-.status-chip-icon {
-  flex-shrink: 0;
+.header-status-icon {
   color: var(--muted);
 }
 
-.status-chip-text {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.15;
+.header-status-icon-charging {
+  color: var(--success);
 }
 
-.status-chip-label {
+.header-status-label {
   font-size: 0.68rem;
   color: var(--faint);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-.status-chip-value {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.85rem;
+.header-status-value {
+  font-size: 0.82rem;
   color: var(--dim);
+  font-weight: 500;
 }
 
-.status-chip-charging {
+.header-status-value-charging {
   color: var(--success);
 }
 
-.app-header-tabs {
+/* ---------- Device Tabs (horizontal pill bar at top of Overview) ---------- */
+
+.device-tabs-bar {
   display: flex;
-  gap: 0.25rem;
-  margin-left: auto;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.75rem 0 0;
 }
 
-.app-header-tabs button {
-  border: none;
+.device-tab-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--line);
   background: transparent;
   color: var(--muted);
-  padding: 0.4rem 0.85rem;
-  border-radius: 6px;
-  font-size: 0.85rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
-.app-header-tabs button.active {
+.device-tab-pill:hover {
+  color: var(--bright);
+  border-color: var(--line-strong);
+  background: var(--hover);
+}
+
+.device-tab-pill.active {
   color: var(--text);
   background: var(--raised);
+  border-color: var(--line-strong);
 }
+
+/* ---------- Device Showcase (large, centered) ---------- */
+
+.device-showcase {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 1.5rem 0 2rem;
+  text-align: center;
+}
+
+.device-showcase-name {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--bright);
+  letter-spacing: -0.01em;
+}
+
+.device-showcase-brand {
+  margin: 0.25rem 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--faint);
+}
+
+.device-showcase-visual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 480px;
+  height: 320px;
+  margin-bottom: 1.25rem;
+}
+
+.device-showcase-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.device-showcase-status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--success);
+  font-weight: 500;
+}
+
+.device-showcase-status-detail {
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.device-showcase-battery-icon {
+  color: var(--bright);
+  vertical-align: -2px;
+}
+
+.device-showcase-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+/* ---------- Info Sections (Current Status / Device Information) ---------- */
+
+.info-section {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  background: var(--card);
+  margin-bottom: 0.75rem;
+}
+
+.info-section-title {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.75rem;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.5rem 2rem;
+}
+
+.info-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.35rem 0;
+}
+
+.info-row + .info-row {
+  border-top: 1px solid var(--line);
+}
+
+.info-label {
+  font-size: 0.8rem;
+  color: var(--faint);
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+
+.info-value {
+  font-size: 0.85rem;
+  color: var(--bright);
+  font-weight: 500;
+  text-align: right;
+}
+
+.info-value-sub {
+  font-size: 0.75rem;
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.info-value-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
+
+/* ---------- Tab Placeholder ---------- */
+
+.tab-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.tab-placeholder h2 {
+  margin: 0.75rem 0 0.4rem;
+  font-size: 1.05rem;
+  color: var(--bright);
+}
+
+.tab-placeholder p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--faint);
+}
+
+/* ---------- Overview Empty State ---------- */
+
+.overview-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  text-align: center;
+}
+
+.overview-empty-icon {
+  margin-bottom: 1rem;
+  color: var(--muted);
+}
+
+.overview-empty h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  color: var(--bright);
+}
+
+.overview-empty p {
+  margin: 0 0 1.25rem;
+  color: var(--faint);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.full-desktop-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Old .app-header and .app-header-tabs removed — replaced by .app-header-bar above */
 
 .full-desktop-content {
   flex: 1;
@@ -475,12 +629,16 @@ button:focus-visible {
   margin: 0 auto;
 }
 
-/* Wider than every other page — the device card (stat grid, DPI panel,
-   detail rows) reads as cramped at the shared 720px width now that the
-   window itself typically has a lot more room than that to give it. Only
-   Overview gets this; Games/Settings stay at the shared width. */
+/* Wider than every other page — the device dashboard (showcase, settings
+   grid, feature tabs, controls) needs the room. Games/Settings stay at
+   the shared width. */
 .page-overview {
-  max-width: 960px;
+  max-width: 1100px;
+}
+
+.page-games {
+  max-width: none;
+  margin: 0;
 }
 
 .page-title {
@@ -492,22 +650,49 @@ button:focus-visible {
   letter-spacing: 0.04em;
 }
 
+.games-section-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.games-section-more {
+  margin-top: 1.5rem;
+  opacity: 0.6;
+}
+
 .games-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
   gap: 0.75rem;
+}
+
+.games-grid-muted {
+  opacity: 0.55;
 }
 
 .game-card {
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
+  gap: 0.7rem;
   min-width: 0;
-  padding: 1rem;
-  border: 1px solid var(--line);
+  padding: 0.85rem;
+  border: 1px solid var(--line-strong);
   border-radius: 10px;
   background: var(--card);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+.game-card:hover {
+  border-color: var(--success);
+  box-shadow: 0 0 0 1px var(--success), 0 0 12px 2px color-mix(in srgb, var(--success) 30%, transparent);
+}
+
+.game-card-not-installed {
+  opacity: 0.5;
 }
 
 .game-card.detected {
@@ -573,6 +758,23 @@ button:focus-visible {
   height: 6px;
   border-radius: 50%;
   background: var(--success);
+}
+
+.game-card-installed-badge {
+  position: absolute;
+  left: 0.5rem;
+  bottom: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(9, 9, 11, 0.75);
+  backdrop-filter: blur(4px);
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
 }
 
 .game-card-content {
@@ -645,13 +847,13 @@ button:focus-visible {
 
 @media (max-width: 600px) {
   .games-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
   }
 }
 
 @media (max-width: 400px) {
   .games-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   }
 }
 

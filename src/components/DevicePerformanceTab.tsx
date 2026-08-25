@@ -19,6 +19,8 @@ interface Props {
   onApplied: (patch: Partial<MouseStatus>) => void;
   /** Name of the game whose profile currently owns the mouse's live settings, if any — see use-game-watcher.ts. */
   lockedBy?: string;
+  /** When true, controls are disabled (device doesn't support live writes). */
+  readOnly?: boolean;
 }
 
 /**
@@ -37,7 +39,7 @@ interface Props {
  * disables every control here for exactly as long as that's true, rather
  * than let a value someone changes here quietly stop meaning anything.
  */
-export function DevicePerformanceTab({ info, status, onApplied, lockedBy }: Props) {
+export function DevicePerformanceTab({ info, status, onApplied, lockedBy, readOnly }: Props) {
   const locked = lockedBy !== undefined;
   const [pending, setPending] = useState<"dpi" | "rate" | "lod" | "surface" | null>(null);
   const [dpiXInput, setDpiXInput] = useState(String(status.dpi));
@@ -117,9 +119,9 @@ export function DevicePerformanceTab({ info, status, onApplied, lockedBy }: Prop
     }
   }
 
-  // Folding `locked` into `busy` disables every control below (they all
-  // already gate on `busy`) without needing to touch each one individually.
-  const busy = pending !== null || locked;
+  // Folding `locked` and `readOnly` into `busy` disables every control below
+  // (they all already gate on `busy`) without needing to touch each one individually.
+  const busy = pending !== null || locked || readOnly;
   const isCustomDpi = !DPI_PRESETS.includes(status.dpi);
   const showSeparateAxes = status.supportsSeparateDpiAxes === true;
 
@@ -128,6 +130,12 @@ export function DevicePerformanceTab({ info, status, onApplied, lockedBy }: Prop
       {locked && (
         <p class="performance-locked-note">
           Locked while <strong>{lockedBy}</strong> is running — this is your default, and it'll be editable again once the game closes.
+        </p>
+      )}
+
+      {readOnly && !locked && (
+        <p class="performance-locked-note">
+          Read-only — live controls are not available for this device yet. Showing current values.
         </p>
       )}
 
