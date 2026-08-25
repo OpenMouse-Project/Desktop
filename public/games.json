@@ -10,7 +10,16 @@
       "id": "valorant",
       "name": "VALORANT",
       "artwork": "https://store-images.s-microsoft.com/image/apps.52657.13898029070941789.3b9f6846-9549-48fd-86cb-b4ed0bd62a55.99c4eceb-d9fa-4213-a6d1-619bd1ec794b",
+      "riotId": "valorant",
       "executables": ["VALORANT-Win64-Shipping.exe"]
+    },
+    {
+      "id": "league-of-legends",
+      "name": "League of Legends / TFT",
+      "artwork": "https://store-images.s-microsoft.com/image/apps.18996.14127010465288187.f9de4a96-0ee4-4da3-bf66-d4132b38c599.caf661a7-e0b3-492d-b91b-63627e47283e",
+      "artworkSecondary": "https://store-images.s-microsoft.com/image/apps.2151.13993220746278015.3cfa64ba-d9fb-4f85-821e-1ed66f33225c.e8c8ed15-317e-4fa7-93f6-c0d9677c9c27",
+      "riotId": "league_of_legends",
+      "executables": ["League of Legends.exe", "TFT.exe"]
     },
     {
       "id": "apex-legends",
@@ -29,6 +38,7 @@
       "id": "fortnite",
       "name": "Fortnite",
       "artwork": "https://store-images.s-microsoft.com/image/apps.19309.70702278257994163.7867c110-12f5-414d-88b4-e851aea24391.e7460671-6dd2-47d7-af59-71118b6d060c",
+      "epicId": "Fortnite",
       "executables": ["FortniteClient-Win64-Shipping.exe"]
     },
 

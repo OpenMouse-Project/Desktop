@@ -60,10 +60,9 @@
 //! call — simpler and cheaper than a fresh instance per call, and (now that
 //! exclusive mode is off) has no bearing on the freeze either way.
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -491,7 +490,7 @@ pub fn hid_open(
     }
 
     let devices = with_hid_api(&api_handle, |api| {
-        let mut paths: Vec<String> = api
+        let paths: Vec<String> = api
             .device_list()
             .filter(|info| {
                 info.vendor_id() == vendor_id

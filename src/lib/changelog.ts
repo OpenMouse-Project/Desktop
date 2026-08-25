@@ -13,6 +13,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.13",
+    date: "2026-08-25",
+    changes: [
+      "Fix: 'Show OpenMouse' actually worked, but the window doesn't exist after you close it in Full Desktop Mode (macOS keeps apps running after their last window closes) — Show now recreates it instead of silently doing nothing",
+      "New: tray icon double-click also brings the window back (Windows)",
+      "New: Games — Riot Client detection (VALORANT, League of Legends/TFT) alongside Steam and Epic",
+      "New: Games — League of Legends and TFT now show as one merged card with a split cover",
+      "Fix: Epic Games matching used a manifest field that changes on every game update, silently breaking over time — now matched on Epic's stable AppName",
+    ],
+  },
+  {
     version: "0.0.12",
     date: "2026-08-25",
     changes: [

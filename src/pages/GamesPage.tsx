@@ -94,7 +94,12 @@ function GameCard({
   return (
     <article class={`game-card ${running ? "detected" : ""} ${game.installed ? "" : "game-card-not-installed"}`} key={game.id}>
       <div class="game-card-art-wrap">
-        {game.steamAppId || game.artwork ? (
+        {game.artworkSecondary ? (
+          <div class="game-card-art-split">
+            <img src={game.artwork} alt="" loading="lazy" />
+            <img src={game.artworkSecondary} alt="" loading="lazy" />
+          </div>
+        ) : game.steamAppId || game.artwork ? (
           <img
             class="game-card-art"
             src={

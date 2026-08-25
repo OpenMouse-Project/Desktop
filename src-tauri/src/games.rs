@@ -5,8 +5,8 @@
 //! 1. `running_process_names` — every running process name (for the "Running"
 //!    badge on game cards).
 //! 2. `scan_installed_games` — parses Steam's libraryfolders.vdf and
-//!    appmanifest_*.acf files, Epic Games manifests, and Windows registry to
-//!    find genuinely installed games.
+//!    appmanifest_*.acf files, Epic Games manifests, and the Riot Client's
+//!    install registry to find genuinely installed games.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -53,13 +53,6 @@ mod vdf {
     pub struct Vdf(HashMap<String, Value>);
 
     impl Vdf {
-        pub fn str(&self, key: &str) -> Option<&str> {
-            self.0.get(&key.to_lowercase()).and_then(|v| match v {
-                Value::Str(s) => Some(s.as_str()),
-                _ => None,
-            })
-        }
-
         pub fn get(&self, key: &str) -> Option<&Value> {
             self.0.get(&key.to_lowercase())
         }
@@ -143,7 +136,6 @@ mod vdf {
 #[derive(Debug, Clone)]
 struct SteamApp {
     app_id: u32,
-    name: String,
     installdir: String,
     library_path: PathBuf,
 }
@@ -155,6 +147,17 @@ impl SteamApp {
             .join("common")
             .join(&self.installdir)
     }
+}
+
+/// An app found installed via a non-Steam launcher (Epic, Riot) — matched
+/// against `games.json` by a stable string ID rather than Steam's numeric
+/// AppID.
+#[derive(Debug, Clone)]
+struct ExternalApp {
+    /// Stable per-game ID: Epic's `AppName` manifest field, or a slug
+    /// derived from the Riot install path (see `scan_riot`).
+    id: String,
+    installdir: String,
 }
 
 /// Parse `libraryfolders.vdf` to get all Steam library root paths.
@@ -197,14 +200,8 @@ fn parse_appmanifest(text: &str, library_path: &Path) -> Option<SteamApp> {
         Some(vdf::Value::Str(s)) if !s.is_empty() => s.clone(),
         _ => return None,
     };
-    let name = match state_map.get("name") {
-        Some(vdf::Value::Str(s)) => s.clone(),
-        _ => String::new(),
-    };
-
     Some(SteamApp {
         app_id,
-        name,
         installdir,
         library_path: library_path.to_path_buf(),
     })
@@ -267,7 +264,7 @@ fn scan_steam() -> Vec<SteamApp> {
 // ---------------------------------------------------------------------------
 
 /// Parse Epic Games manifest files to find installed games.
-fn scan_epic() -> Vec<SteamApp> {
+fn scan_epic() -> Vec<ExternalApp> {
     let mut apps = Vec::new();
     let program_data = std::env::var("ProgramData").unwrap_or_default();
     let manifests_dir = PathBuf::from(format!(
@@ -283,30 +280,20 @@ fn scan_epic() -> Vec<SteamApp> {
             if entry.path().extension().and_then(|e| e.to_str()) == Some("item") {
                 if let Ok(text) = std::fs::read_to_string(entry.path()) {
                     if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&text) {
-                        let install_path = manifest["InstallLocation"]
-                            .as_str()
-                            .unwrap_or("");
-                        let display_name = manifest["DisplayName"]
-                            .as_str()
-                            .unwrap_or("Unknown");
-                        let catalog_ns = manifest["CatalogNamespace"]
-                            .as_str()
-                            .unwrap_or("");
-                        let app_id = manifest["AppVersionString"]
-                            .as_str()
-                            .unwrap_or("");
+                        let install_path = manifest["InstallLocation"].as_str().unwrap_or("");
+                        // AppName is Epic's own stable per-title slug (e.g.
+                        // "Fortnite") — unlike AppVersionString, it doesn't
+                        // change every time the game patches, so it's safe
+                        // to match against games.json long-term.
+                        let app_name = manifest["AppName"].as_str().unwrap_or("");
 
-                        // Use namespace+appId as a pseudo ID, or hash the display name
-                        let pseudo_id: u32 = format!("{catalog_ns}{app_id}")
-                            .bytes()
-                            .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
-
-                        if !install_path.is_empty() && Path::new(install_path).exists() {
-                            apps.push(SteamApp {
-                                app_id: pseudo_id,
-                                name: display_name.to_string(),
+                        if !app_name.is_empty()
+                            && !install_path.is_empty()
+                            && Path::new(install_path).exists()
+                        {
+                            apps.push(ExternalApp {
+                                id: app_name.to_string(),
                                 installdir: install_path.to_string(),
-                                library_path: PathBuf::new(),
                             });
                         }
                     }
@@ -319,17 +306,80 @@ fn scan_epic() -> Vec<SteamApp> {
 }
 
 // ---------------------------------------------------------------------------
+// Riot Client install scanning
+// ---------------------------------------------------------------------------
+
+/// Parse `RiotClientInstalls.json`'s `associated_client` map to find
+/// installed Riot titles. Each key is a game's install directory (e.g.
+/// `C:/Riot Games/VALORANT/live/`, `C:/Riot Games/League of Legends/`) —
+/// there's no per-game manifest the way Steam/Epic have one, just this one
+/// global file the Riot Client maintains. TFT rides on the League client
+/// (same install dir, same executable), so it never appears as a separate
+/// entry here — nothing else to detect for it.
+fn scan_riot() -> Vec<ExternalApp> {
+    let mut apps = Vec::new();
+    let program_data = std::env::var("ProgramData").unwrap_or_default();
+    let installs_path = PathBuf::from(format!(r"{program_data}\Riot Games\RiotClientInstalls.json"));
+
+    let Ok(text) = std::fs::read_to_string(&installs_path) else {
+        return apps;
+    };
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return apps;
+    };
+    let Some(associated) = manifest["associated_client"].as_object() else {
+        return apps;
+    };
+
+    for install_path in associated.keys() {
+        // Slug from the folder right after "Riot Games/", stripping a
+        // trailing "/live" (VALORANT's install dir) — e.g.
+        // "C:/Riot Games/VALORANT/live/" -> "valorant",
+        // "C:/Riot Games/League of Legends/" -> "league_of_legends".
+        let normalized = install_path.replace('\\', "/");
+        let Some(after) = normalized.split("Riot Games/").nth(1) else {
+            continue;
+        };
+        let mut segment = after.trim_end_matches('/');
+        if let Some(stripped) = segment.strip_suffix("/live") {
+            segment = stripped;
+        }
+        if segment.is_empty() {
+            continue;
+        }
+        let slug = segment.to_lowercase().replace(' ', "_");
+
+        if Path::new(install_path).exists() {
+            apps.push(ExternalApp {
+                id: slug,
+                installdir: install_path.clone(),
+            });
+        }
+    }
+
+    apps
+}
+
+// ---------------------------------------------------------------------------
 // Main command
 // ---------------------------------------------------------------------------
 
 /// Scans for genuinely installed games using proper game launcher detection:
 /// - Steam: parses libraryfolders.vdf + appmanifest_*.acf
-/// - Epic Games Store: parses manifest files
+/// - Epic Games Store: parses manifest files (matched by `AppName`)
+/// - Riot Client: parses RiotClientInstalls.json (matched by a slug derived
+///   from the install path — see `scan_riot`)
 ///
-/// Returns which of the known Steam games are installed, and all
-/// game install directories found.
+/// Takes the known IDs from games.json for each launcher and returns which
+/// ones are actually installed, plus every install directory found (for
+/// anything that wants the raw path regardless of whether it's a "known"
+/// game).
 #[tauri::command]
-pub fn scan_installed_games(known_steam_ids: Vec<u32>) -> InstalledGamesResult {
+pub fn scan_installed_games(
+    known_steam_ids: Vec<u32>,
+    known_epic_ids: Vec<String>,
+    known_riot_ids: Vec<String>,
+) -> InstalledGamesResult {
     // 1. Scan Steam
     let steam_apps = scan_steam();
     let mut steam_ids_to_apps: HashMap<u32, SteamApp> = HashMap::new();
@@ -339,9 +389,18 @@ pub fn scan_installed_games(known_steam_ids: Vec<u32>) -> InstalledGamesResult {
 
     // 2. Scan Epic
     let epic_apps = scan_epic();
+    let epic_ids_to_apps: HashMap<&str, &ExternalApp> =
+        epic_apps.iter().map(|a| (a.id.as_str(), a)).collect();
 
-    // 3. Match known Steam games against installed
+    // 3. Scan Riot
+    let riot_apps = scan_riot();
+    let riot_ids_to_apps: HashMap<&str, &ExternalApp> =
+        riot_apps.iter().map(|a| (a.id.as_str(), a)).collect();
+
+    // 4. Match known games from each launcher against what's installed
     let mut installed_steam_ids: Vec<u32> = Vec::new();
+    let mut installed_epic_ids: Vec<String> = Vec::new();
+    let mut installed_riot_ids: Vec<String> = Vec::new();
     let mut install_paths: Vec<String> = Vec::new();
 
     for &id in &known_steam_ids {
@@ -350,19 +409,32 @@ pub fn scan_installed_games(known_steam_ids: Vec<u32>) -> InstalledGamesResult {
             install_paths.push(app.install_path().to_string_lossy().to_string());
         }
     }
-
-    // Add Epic games
-    for app in &epic_apps {
-        install_paths.push(app.installdir.clone());
+    for id in &known_epic_ids {
+        if let Some(app) = epic_ids_to_apps.get(id.as_str()) {
+            installed_epic_ids.push(id.clone());
+            install_paths.push(app.installdir.clone());
+        }
+    }
+    for id in &known_riot_ids {
+        if let Some(app) = riot_ids_to_apps.get(id.as_str()) {
+            installed_riot_ids.push(id.clone());
+            install_paths.push(app.installdir.clone());
+        }
     }
 
     install_paths.sort();
     install_paths.dedup();
     installed_steam_ids.sort();
     installed_steam_ids.dedup();
+    installed_epic_ids.sort();
+    installed_epic_ids.dedup();
+    installed_riot_ids.sort();
+    installed_riot_ids.dedup();
 
     InstalledGamesResult {
         installed_steam_ids,
+        installed_epic_ids,
+        installed_riot_ids,
         install_paths,
     }
 }
@@ -371,6 +443,10 @@ pub fn scan_installed_games(known_steam_ids: Vec<u32>) -> InstalledGamesResult {
 pub struct InstalledGamesResult {
     /// Steam AppIDs that are installed on this system.
     installed_steam_ids: Vec<u32>,
-    /// All game install directory paths found (Steam + Epic + registry).
+    /// Epic `AppName` slugs (from games.json's `epicId`) that are installed.
+    installed_epic_ids: Vec<String>,
+    /// Riot install-path slugs (from games.json's `riotId`) that are installed.
+    installed_riot_ids: Vec<String>,
+    /// All game install directory paths found (Steam + Epic + Riot).
     install_paths: Vec<String>,
 }

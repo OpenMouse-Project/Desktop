@@ -2,7 +2,8 @@ use std::sync::Mutex;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{LogicalSize, Manager, Size, State, WebviewWindow, WindowEvent};
+use tauri::webview::WebviewWindowBuilder;
+use tauri::{AppHandle, LogicalSize, Manager, Size, State, WebviewWindow, WindowEvent};
 
 #[macro_use]
 mod applog;
@@ -71,6 +72,52 @@ fn set_mode(mode: AppMode, window: WebviewWindow, state: State<ModeState>) -> Ap
     mode
 }
 
+/// Brings the main window to front, recreating it first if it doesn't
+/// exist. On macOS, closing the last window doesn't quit the whole process
+/// (that's normal platform convention — the app, and its tray icon, stay
+/// alive) but Full Desktop Mode's close handler doesn't intercept that
+/// close, so the window itself is genuinely destroyed rather than hidden.
+/// Without this, "Show OpenMouse" from the tray would find no window and
+/// silently do nothing (CONFIRMED — this is exactly what happened before
+/// this existed).
+fn show_main_window(app: &AppHandle) {
+    let window = match app.get_webview_window("main") {
+        Some(window) => window,
+        None => {
+            applog!("[tray] 'main' window doesn't exist, recreating it");
+            let Some(config) = app.config().app.windows.iter().find(|w| w.label == "main") else {
+                applog!("[tray] no 'main' window config found, can't recreate");
+                return;
+            };
+            match WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()) {
+                Ok(window) => {
+                    // Recreating from the static config alone gives back
+                    // its on-disk default size, not whatever mode the app
+                    // was actually in — reapply that the same way the
+                    // initial launch does (see `setup` below).
+                    let mode = *app.state::<ModeState>().0.lock().unwrap();
+                    resize_for_mode(&window, mode);
+                    window
+                }
+                Err(e) => {
+                    applog!("[tray] failed to recreate 'main' window: {e}");
+                    return;
+                }
+            }
+        }
+    };
+
+    if let Err(e) = window.unminimize() {
+        applog!("[tray] unminimize() failed: {e}");
+    }
+    if let Err(e) = window.show() {
+        applog!("[tray] show() failed: {e}");
+    }
+    if let Err(e) = window.set_focus() {
+        applog!("[tray] set_focus() failed: {e}");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -112,36 +159,40 @@ pub fn run() {
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.unminimize();
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
+                    "show" => show_main_window(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let tauri::tray::TrayIconEvent::Click {
-                        button: tauri::tray::MouseButton::Left,
-                        button_state: tauri::tray::MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            match window.is_visible() {
-                                Ok(true) => {
-                                    let _ = window.hide();
+                    // Left click toggles show/hide (only meaningful when
+                    // the window still exists — nothing to hide otherwise,
+                    // so that case just shows/recreates it, same as
+                    // double-click). Double-click (Windows only —
+                    // tray-icon doesn't report this on macOS/Linux) always
+                    // shows rather than toggling: a double-click is two
+                    // rapid single clicks first, so without this arm the
+                    // pair would show-then-hide the window right back out
+                    // from under the user.
+                    match event {
+                        tauri::tray::TrayIconEvent::Click {
+                            button: tauri::tray::MouseButton::Left,
+                            button_state: tauri::tray::MouseButtonState::Up,
+                            ..
+                        } => {
+                            let app = tray.app_handle();
+                            match app.get_webview_window("main").map(|w| w.is_visible()) {
+                                Some(Ok(true)) => {
+                                    if let Some(window) = app.get_webview_window("main") {
+                                        let _ = window.hide();
+                                    }
                                 }
-                                _ => {
-                                    let _ = window.unminimize();
-                                    let _ = window.show();
-                                    let _ = window.set_focus();
-                                }
+                                _ => show_main_window(app),
                             }
                         }
+                        tauri::tray::TrayIconEvent::DoubleClick { .. } => {
+                            show_main_window(tray.app_handle());
+                        }
+                        _ => {}
                     }
                 })
                 .build(app)?;

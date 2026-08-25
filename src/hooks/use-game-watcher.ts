@@ -29,7 +29,16 @@ export interface Game {
   artwork?: string;
   name: string;
   steamAppId?: number;
+  /** Epic manifest `AppName` — Epic's own stable per-title slug. */
+  epicId?: string;
+  /** Slug derived from the Riot Client's install path (e.g. "valorant",
+   *  "league_of_legends") — see scan_riot() in games.rs. */
+  riotId?: string;
   artworkFallback?: string;
+  /** Second cover to show side-by-side with `artwork` on the card — for a
+   *  card that represents two titles sharing one install/executable set
+   *  (e.g. League of Legends / TFT). */
+  artworkSecondary?: string;
   executables: string[];
   installed?: boolean;
 }
@@ -105,22 +114,29 @@ export function useGameWatcher(connection: MouseConnection) {
         }
         const data = (await response.json()) as GamesFile;
 
-        // Collect Steam AppIDs from the known games list
+        // Collect each launcher's known IDs from the games list
         const knownSteamIds = data.games
           .filter((g) => g.steamAppId)
           .map((g) => Number(g.steamAppId));
+        const knownEpicIds = data.games.filter((g) => g.epicId).map((g) => g.epicId!);
+        const knownRiotIds = data.games.filter((g) => g.riotId).map((g) => g.riotId!);
 
-        // Scan system for installed games via Steam/Epic
+        // Scan system for installed games via Steam/Epic/Riot
         const scanResult = await invoke<{
           installed_steam_ids: number[];
-        }>("scan_installed_games", { knownSteamIds });
+          installed_epic_ids: string[];
+          installed_riot_ids: string[];
+        }>("scan_installed_games", { knownSteamIds, knownEpicIds, knownRiotIds });
 
-        const installedSet = new Set(scanResult.installed_steam_ids);
+        const installedSteamSet = new Set(scanResult.installed_steam_ids);
+        const installedEpicSet = new Set(scanResult.installed_epic_ids);
+        const installedRiotSet = new Set(scanResult.installed_riot_ids);
         const gamesWithInstallStatus = data.games.map((game) => ({
           ...game,
-          installed: game.steamAppId
-            ? installedSet.has(Number(game.steamAppId))
-            : false,
+          installed:
+            (!!game.steamAppId && installedSteamSet.has(Number(game.steamAppId))) ||
+            (!!game.epicId && installedEpicSet.has(game.epicId)) ||
+            (!!game.riotId && installedRiotSet.has(game.riotId)),
         }));
 
         // Installed games first, then not-installed

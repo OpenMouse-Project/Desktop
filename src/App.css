@@ -758,6 +758,30 @@ button:focus-visible {
   background: var(--raised);
 }
 
+/* A card whose game covers two artworks at once (e.g. League of Legends /
+   TFT) — same footprint as a single .game-card-art, split into two tiles
+   side by side instead of one image. */
+.game-card-art-split {
+  display: flex;
+  gap: 2px;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--raised);
+}
+
+.game-card-art-split img {
+  width: 50%;
+  height: 100%;
+  /* contain, not cover — cover zoomed in on half-width and cropped each
+     poster's logo off the sides. Each tile keeps its own background so the
+     letterbox bars this introduces aren't bare page background. */
+  object-fit: contain;
+  background: var(--raised);
+  display: block;
+}
+
 .game-card-running-badge {
   position: absolute;
   left: 0.5rem;
