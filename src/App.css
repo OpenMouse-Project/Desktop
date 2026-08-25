@@ -390,9 +390,32 @@ button:focus-visible {
 
 .device-tabs-bar {
   display: flex;
+  align-items: center;
   justify-content: center;
   gap: 0.35rem;
   padding: 0.75rem 0 0;
+  position: relative;
+}
+
+.device-tab-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  position: absolute;
+  left: 0;
+}
+
+.device-tab-back:hover {
+  color: var(--bright);
+  border-color: var(--line-strong);
+  background: var(--hover);
 }
 
 .device-tab-pill {

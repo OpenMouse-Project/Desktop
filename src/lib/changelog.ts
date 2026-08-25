@@ -13,6 +13,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.12",
+    date: "2026-08-25",
+    changes: [
+      "Fix: tray menu's 'Show OpenMouse' now restores a minimized window instead of doing nothing",
+      "New: back button on the device overview to return to the device selector",
+    ],
+  },
+  {
     version: "0.0.11",
     date: "2026-08-25",
     changes: [

@@ -114,6 +114,7 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
@@ -135,6 +136,7 @@ pub fn run() {
                                     let _ = window.hide();
                                 }
                                 _ => {
+                                    let _ = window.unminimize();
                                     let _ = window.show();
                                     let _ = window.set_focus();
                                 }

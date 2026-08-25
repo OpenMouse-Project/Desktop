@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { Battery, Gamepad2, Info, RefreshCw, SlidersHorizontal, Lightbulb, Layers, MousePointerClick, Usb } from "lucide-preact";
+import { ArrowLeft, Battery, Gamepad2, Info, RefreshCw, SlidersHorizontal, Lightbulb, Layers, MousePointerClick, Usb } from "lucide-preact";
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import type { MouseConnection } from "../hooks/use-mouse-connection";
 import type { ActiveGameOverride } from "../hooks/use-game-watcher";
@@ -81,6 +81,7 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
     connectingKey,
     select,
     refresh,
+    back,
     patchStatus,
     setAutoRefreshPaused,
   } = connection;
@@ -126,6 +127,9 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
       <section class="page page-overview">
         {/* Device feature tab bar */}
         <nav class="device-tabs-bar">
+          <button class="device-tab-back" onClick={back}>
+            <ArrowLeft size={13} aria-hidden="true" /> Devices
+          </button>
           {tabs.map((tab) => (
             <button
               key={tab.id}
