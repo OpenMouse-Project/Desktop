@@ -1186,7 +1186,8 @@ button:focus-visible {
    full-width here instead (see setting-row-block above), so let the chips
    actually use that width and wrap left-aligned rather than staying
    squeezed into the same narrow right-hand column. */
-.setting-row-block .performance-chip-group {
+.setting-row-block .performance-chip-group,
+.sensor-panel .performance-chip-group {
   justify-content: flex-start;
   max-width: none;
 }
