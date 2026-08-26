@@ -706,12 +706,18 @@ button:focus-visible {
   border: 1px solid var(--line-strong);
   border-radius: 10px;
   background: var(--card);
+  cursor: pointer;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
 }
 
 .game-card:hover {
   border-color: var(--success);
   box-shadow: 0 0 0 1px var(--success), 0 0 12px 2px color-mix(in srgb, var(--success) 30%, transparent);
+}
+
+.game-card:focus-visible {
+  outline: 2px solid var(--success);
+  outline-offset: 2px;
 }
 
 .game-card-not-installed {
@@ -891,17 +897,6 @@ button:focus-visible {
   font-size: 0.75rem;
 }
 
-.game-card-executables {
-  display: block;
-  margin-top: 0.55rem;
-  overflow: hidden;
-  color: var(--faint);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.65rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .games-error {
   color: #ff8585;
   font-size: 0.8rem;
@@ -919,48 +914,103 @@ button:focus-visible {
   }
 }
 
-/* ---------- Game profile panel (Games tab) ---------- */
+/* ---------- Game profile page (Games tab — full page, not a modal) ---------- */
 
-.game-profile-overlay {
-  position: fixed;
-  inset: 0;
+.page-game-profile {
+  max-width: 900px;
+}
+
+/* Sits above both columns, not inside .profile-art-col — that's what makes
+   .profile-art-col and .profile-content-col start at the same row (both
+   flex-start siblings with nothing of unequal height above just one of
+   them) instead of needing a hand-tuned margin-top to fake the alignment.
+   Sticky on its own so it stays put while the page scrolls, same as the
+   art below it. */
+.profile-back-button {
+  position: sticky;
+  top: 0.75rem;
+  z-index: 1;
+  margin-bottom: 1.75rem;
+}
+
+.profile-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 2rem;
+}
+
+/* Plain flex item — no position/sticky here. WebKit (this app's window is
+   a WKWebView on macOS) jitters a `position: sticky` element by a pixel or
+   two while scrolling when it's a flex item directly participating in the
+   flex layout algorithm every frame. Decoupled below: this is just a
+   width-constrained box: .profile-art-sticky (a normal block child, not a
+   flex item) is what's actually sticky. */
+.profile-art-col {
+  flex-shrink: 0;
+}
+
+.profile-art-sticky {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  position: sticky;
+  top: calc(0.75rem + 1.875rem + 1.75rem);
+}
+
+.profile-content-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-hero-art {
+  width: 260px;
+  aspect-ratio: 2 / 3;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.profile-hero-art-fallback {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(9, 9, 11, 0.6);
-  backdrop-filter: blur(2px);
-  padding: 1.5rem;
-  z-index: 50;
-}
-
-.game-profile-panel {
-  width: 100%;
-  max-width: 420px;
-  max-height: 100%;
-  overflow-y: auto;
-  scrollbar-width: none;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--card);
-  padding: 1.5rem;
-}
-
-.game-profile-panel::-webkit-scrollbar {
-  display: none;
-}
-
-.game-profile-panel-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.25rem;
-}
-
-.game-profile-panel-header h2 {
-  margin: 0.15rem 0 0;
-  font-size: 1.05rem;
   color: var(--bright);
+  font-size: 3.5rem;
+  font-weight: 700;
+}
+
+.profile-hero-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  width: 260px;
+}
+
+.profile-hero-info .device-showcase-name {
+  font-size: 1.3rem;
+  text-align: left;
+}
+
+/* Apply now / Clear live here, not in a footer at the bottom of the
+   scrolling right column — this box is sticky, so the actions stay
+   reachable the whole time instead of requiring a scroll down to find
+   them. */
+.profile-hero-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.profile-hero-actions .rescan-button {
+  flex: 1;
+  justify-content: center;
+}
+
+.profile-device-list {
+  margin-top: 0.6rem;
 }
 
 .game-profile-hint {

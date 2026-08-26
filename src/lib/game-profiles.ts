@@ -7,11 +7,13 @@
 // — plain localStorage, keyed by games.json's own `id`, not a source of
 // truth for anything the device itself reports.
 //
-// Deliberately just DPI and polling rate, not every writable setting
-// DevicePerformanceTab exposes (lift-off distance, gaming surface mode,
-// ...) — those two are the only ones close to universally supported across
-// gaming mice; a profile built around a setting most devices don't have
-// would be misleading more often than useful.
+// Covers every writable setting DevicePerformanceTab exposes — DPI,
+// polling rate, lift-off distance, and gaming surface mode — not just
+// DPI/rate. Lift-off and surface mode are guarded behind the same
+// `status.supportedLiftOffDistances`/`status.gamingSurfaceMode` presence
+// checks DevicePerformanceTab itself uses (GameProfilePanel.tsx), so a
+// profile only ever offers to set what the connected device actually
+// reports supporting.
 //
 // A field being `undefined` means "this profile doesn't touch that setting,"
 // not "set it to nothing" — a profile can be DPI-only, or rate-only.
@@ -19,7 +21,7 @@
 
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
-import { withLogitechClient } from "../native-hid/logitech-actions";
+import { withLogitechClient, type GamingSurfaceMode, type LiftOffDistance } from "../native-hid/logitech-actions";
 
 const STORAGE_KEY = "openmouse:game-profiles";
 
@@ -27,6 +29,8 @@ export interface GameProfile {
   dpi?: number;
   dpiY?: number;
   pollingRateHz?: number;
+  liftOffDistance?: LiftOffDistance;
+  gamingSurfaceMode?: GamingSurfaceMode;
   /** Push this profile to the connected mouse the moment the game is detected running. */
   autoApply: boolean;
 }
@@ -91,7 +95,12 @@ export function subscribeGameProfiles(listener: Listener): () => void {
 /** True if a profile actually overrides at least one setting. */
 export function isProfileMeaningful(profile: GameProfile | undefined): profile is GameProfile {
   if (!profile) return false;
-  return profile.dpi !== undefined || profile.pollingRateHz !== undefined;
+  return (
+    profile.dpi !== undefined ||
+    profile.pollingRateHz !== undefined ||
+    profile.liftOffDistance !== undefined ||
+    profile.gamingSurfaceMode !== undefined
+  );
 }
 
 /** Short human-readable summary of what a profile actually changes, for the apply notification. */
@@ -103,6 +112,8 @@ export function describeProfile(profile: GameProfile): string {
       : `${profile.dpi} DPI`);
   }
   if (profile.pollingRateHz !== undefined) parts.push(`${profile.pollingRateHz} Hz`);
+  if (profile.liftOffDistance !== undefined) parts.push(`${profile.liftOffDistance} lift-off`);
+  if (profile.gamingSurfaceMode !== undefined) parts.push(`surface ${profile.gamingSurfaceMode}`);
   return parts.join(", ");
 }
 
@@ -149,6 +160,18 @@ export async function applyGameProfile(
       await run("Polling rate", async () => {
         const applied = await client.setPollingRate(profile.pollingRateHz!);
         onApplied({ pollingRateHz: applied });
+      });
+    }
+    if (profile.liftOffDistance !== undefined) {
+      await run("Lift-off distance", async () => {
+        const applied = await client.setLiftOffDistance(profile.liftOffDistance!);
+        onApplied({ liftOffDistance: applied });
+      });
+    }
+    if (profile.gamingSurfaceMode !== undefined) {
+      await run("Gaming surface", async () => {
+        const applied = await client.setGamingSurfaceMode(profile.gamingSurfaceMode!);
+        onApplied({ gamingSurfaceMode: applied });
       });
     }
   });

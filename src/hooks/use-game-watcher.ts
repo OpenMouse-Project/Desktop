@@ -74,7 +74,7 @@ const POLL_INTERVAL_MS = 4000;
 interface ActiveOverride {
   gameId: string;
   gameName: string;
-  restore: Pick<GameProfile, "dpi" | "dpiY" | "pollingRateHz">;
+  restore: Pick<GameProfile, "dpi" | "dpiY" | "pollingRateHz" | "liftOffDistance" | "gamingSurfaceMode">;
 }
 
 /** What OverviewPage needs to know: a profile is in control, and whose. */
@@ -186,6 +186,8 @@ export function useGameWatcher(connection: MouseConnection) {
             dpi: profile.dpi !== undefined ? connected.status.dpi : undefined,
             dpiY: profile.dpiY !== undefined ? connected.status.dpiY : undefined,
             pollingRateHz: profile.pollingRateHz !== undefined ? connected.status.pollingRateHz : undefined,
+            liftOffDistance: profile.liftOffDistance !== undefined ? connected.status.liftOffDistance ?? undefined : undefined,
+            gamingSurfaceMode: profile.gamingSurfaceMode !== undefined ? connected.status.gamingSurfaceMode ?? undefined : undefined,
           };
 
       try {

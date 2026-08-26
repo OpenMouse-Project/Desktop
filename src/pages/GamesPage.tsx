@@ -32,6 +32,21 @@ export function GamesPage({ connection, watcher }: Props) {
   const installedGames = games.filter((g) => g.installed);
   const notInstalledGames = games.filter((g) => !g.installed);
 
+  // Full page, not a modal over the grid — same pattern OverviewPage uses
+  // for its list/device split, so editing a profile gets the same room a
+  // device dashboard gets (hero art, device picker, DPI/rate controls)
+  // instead of being squeezed into a small overlay.
+  if (editingGame) {
+    return (
+      <GameProfilePanel
+        key={editingGame.id}
+        game={editingGame}
+        connection={connection}
+        onClose={() => setEditingGame(null)}
+      />
+    );
+  }
+
   return (
     <section class="page page-games">
       <h1 class="page-title">Games</h1>
@@ -72,10 +87,6 @@ export function GamesPage({ connection, watcher }: Props) {
           </div>
         </>
       )}
-
-      {editingGame && (
-        <GameProfilePanel key={editingGame.id} game={editingGame} connection={connection} onClose={() => setEditingGame(null)} />
-      )}
     </section>
   );
 }
@@ -92,7 +103,19 @@ function GameCard({
   onEditProfile: () => void;
 }) {
   return (
-    <article class={`game-card ${running ? "detected" : ""} ${game.installed ? "" : "game-card-not-installed"}`} key={game.id}>
+    <article
+      class={`game-card ${running ? "detected" : ""} ${game.installed ? "" : "game-card-not-installed"}`}
+      key={game.id}
+      onClick={onEditProfile}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onEditProfile();
+        }
+      }}
+    >
       <div class="game-card-art-wrap">
         {game.artworkSecondary ? (
           <div class="game-card-art-split">
@@ -135,18 +158,11 @@ function GameCard({
       <div class="game-card-content">
         <div class="game-card-title-row">
           <h2>{game.name}</h2>
-          <button
-            class="game-card-profile-button"
-            title="Configure a device profile for this game"
-            onClick={onEditProfile}
-          >
+          <span class="game-card-profile-button" title="Configure a device profile for this game" aria-hidden="true">
             {profile?.autoApply && <Zap size={11} class="game-card-profile-auto-icon" aria-hidden="true" />}
             <SlidersHorizontal size={13} />
-          </button>
+          </span>
         </div>
-        <span class="game-card-executables">
-          {game.executables.join(" · ")}
-        </span>
       </div>
     </article>
   );

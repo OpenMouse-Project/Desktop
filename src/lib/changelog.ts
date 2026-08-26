@@ -3,6 +3,14 @@
 // field, since neither reliably says what actually matters to someone
 // deciding whether to install an update. Add a new entry at the top each
 // time tauri.conf.json's `version` is bumped for a release.
+//
+// User-facing only — no CI/build-fix/internal-cleanup entries. A version
+// bump needed purely to fix a broken previous release (a build that failed
+// CI, a warning cleanup that broke Windows, ...) doesn't get its own line;
+// fold whatever it was actually trying to ship into the entry for the
+// version that ends up working, the way 0.0.13-0.0.15 collapsed into one
+// entry here — the reader wants "what's new for me," not "how the last
+// release attempt went."
 
 export interface ChangelogEntry {
   version: string;
@@ -13,29 +21,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.16",
+    date: "2026-08-25",
+    changes: [
+      "New: game profiles now cover the full mouse — lift-off distance and gaming surface mode, alongside DPI and polling rate",
+      "Game profile editor is now a full page instead of a popup, with the game's artwork alongside the controls and a device picker so you can target any connected mouse, not just whichever one happened to be active",
+      "Every game card in the Games tab is now clickable, not just its small settings icon",
+      "Changelog now only lists what's actually new, not internal build fixes",
+    ],
+  },
+  {
     version: "0.0.15",
     date: "2026-08-25",
     changes: [
-      "Fix: Windows build failure, round 2 — 0.0.14 fixed two of three imports the same warning cleanup had broken, missed a third (a `mut` also only needed by Windows-only code)",
-    ],
-  },
-  {
-    version: "0.0.14",
-    date: "2026-08-25",
-    changes: [
-      "Fix: Windows build failure — a prior warning cleanup dropped two imports that macOS's compiler saw as unused but Windows-only code actually needs",
-      "Games: League of Legends/TFT card now crossfades between both covers instead of squeezing them into cropped half-width tiles",
-    ],
-  },
-  {
-    version: "0.0.13",
-    date: "2026-08-25",
-    changes: [
-      "Fix: 'Show OpenMouse' actually worked, but the window doesn't exist after you close it in Full Desktop Mode (macOS keeps apps running after their last window closes) — Show now recreates it instead of silently doing nothing",
-      "New: tray icon double-click also brings the window back (Windows)",
       "New: Games — Riot Client detection (VALORANT, League of Legends/TFT) alongside Steam and Epic",
-      "New: Games — League of Legends and TFT now show as one merged card with a split cover",
-      "Fix: Epic Games matching used a manifest field that changes on every game update, silently breaking over time — now matched on Epic's stable AppName",
+      "New: Games — League of Legends and TFT now show as one merged card that crossfades between both covers",
+      "New: tray icon double-click also brings the window back (Windows)",
+      "Fix: 'Show OpenMouse' now reliably brings the window back, even after closing it in Full Desktop Mode",
     ],
   },
   {
