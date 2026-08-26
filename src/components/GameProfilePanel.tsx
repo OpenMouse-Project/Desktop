@@ -64,11 +64,33 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
   const canControl = connected?.brand === "Logitech" && connectedInfo !== null;
   const showSeparateAxes = status?.supportsSeparateDpiAxes === true;
 
-  const [dpiInput, setDpiInput] = useState(existing?.dpi !== undefined ? String(existing.dpi) : "");
-  const [dpiYInput, setDpiYInput] = useState(existing?.dpiY !== undefined ? String(existing.dpiY) : "");
-  const [pollingRateHz, setPollingRateHz] = useState<number | undefined>(existing?.pollingRateHz);
-  const [liftOffDistance, setLiftOffDistance] = useState<GameProfile["liftOffDistance"]>(existing?.liftOffDistance);
-  const [gamingSurfaceMode, setGamingSurfaceMode] = useState<GameProfile["gamingSurfaceMode"]>(existing?.gamingSurfaceMode);
+  // "Not set" isn't a real state a field can be in — every field starts
+  // from whatever's already saved, or failing that, whatever the connected
+  // device's CURRENT setting already is (there's always a real value on
+  // the device to start from). Computed directly in the initializers, not
+  // via an effect, so simply opening this page for a device that's already
+  // connected doesn't itself trigger the save-on-change effect below —
+  // that effect only fires on an actual edit, or the device-switch effect
+  // just past it re-seeding for a NEWLY selected device.
+  const [dpiInput, setDpiInput] = useState(
+    existing?.dpi !== undefined ? String(existing.dpi) : status ? String(status.dpi) : "",
+  );
+  const [dpiYInput, setDpiYInput] = useState(
+    existing?.dpiY !== undefined
+      ? String(existing.dpiY)
+      : status && showSeparateAxes
+        ? String(status.dpiY ?? status.dpi)
+        : "",
+  );
+  const [pollingRateHz, setPollingRateHz] = useState<number | undefined>(
+    existing?.pollingRateHz ?? status?.pollingRateHz ?? undefined,
+  );
+  const [liftOffDistance, setLiftOffDistance] = useState<GameProfile["liftOffDistance"]>(
+    existing?.liftOffDistance ?? status?.liftOffDistance ?? undefined,
+  );
+  const [gamingSurfaceMode, setGamingSurfaceMode] = useState<GameProfile["gamingSurfaceMode"]>(
+    existing?.gamingSurfaceMode ?? status?.gamingSurfaceMode ?? undefined,
+  );
   const [autoApply, setAutoApply] = useState(existing?.autoApply ?? false);
   const [pending, setPending] = useState<"apply" | null>(null);
 
@@ -84,6 +106,34 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
       autoApply,
     };
   }
+
+  // The initializers above cover the device already connected at mount —
+  // this covers switching to a DIFFERENT device afterward in the picker
+  // below, re-seeding from that mouse's own current settings instead of
+  // leaving the previous device's numbers sitting there. Still never
+  // touches a field a saved profile already pins.
+  const skipFirstDeviceSync = useRef(true);
+  useEffect(() => {
+    if (skipFirstDeviceSync.current) {
+      skipFirstDeviceSync.current = false;
+      return;
+    }
+    if (!status) return;
+    if (existing?.dpi === undefined) {
+      setDpiInput(String(status.dpi));
+      if (showSeparateAxes) setDpiYInput(String(status.dpiY ?? status.dpi));
+    }
+    if (existing?.pollingRateHz === undefined && status.pollingRateHz) {
+      setPollingRateHz(status.pollingRateHz);
+    }
+    if (existing?.liftOffDistance === undefined && status.liftOffDistance) {
+      setLiftOffDistance(status.liftOffDistance);
+    }
+    if (existing?.gamingSurfaceMode === undefined && status.gamingSurfaceMode) {
+      setGamingSurfaceMode(status.gamingSurfaceMode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected?.key]);
 
   // Skip the very first run — there's nothing to persist yet that
   // getGameProfile() didn't already have (this just mirrors `existing`
@@ -116,9 +166,14 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
 
   function handleClear() {
     clearGameProfile(game.id);
-    setDpiInput("");
-    setDpiYInput("");
-    setPollingRateHz(undefined);
+    // Back to the connected device's current settings, not blank — same
+    // "there's always a real value to start from" rule the initial load
+    // follows above.
+    setDpiInput(status ? String(status.dpi) : "");
+    setDpiYInput(status && showSeparateAxes ? String(status.dpiY ?? status.dpi) : "");
+    setPollingRateHz(status?.pollingRateHz);
+    setLiftOffDistance(status?.liftOffDistance ?? undefined);
+    setGamingSurfaceMode(status?.gamingSurfaceMode ?? undefined);
     setAutoApply(false);
     showToast(`Cleared profile for ${game.name}.`, "info");
   }
@@ -233,9 +288,15 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
                 <span class="setting-eyebrow">DPI</span>
                 <span class="setting-title">Sensitivity</span>
               </div>
-              {dpiInput !== "" && (
-                <button class="chip-clear" onClick={() => { setDpiInput(""); setDpiYInput(""); }}>
-                  Not set
+              {status && dpiInput !== String(status.dpi) && (
+                <button
+                  class="chip-clear"
+                  onClick={() => {
+                    setDpiInput(String(status.dpi));
+                    setDpiYInput(showSeparateAxes ? String(status.dpiY ?? status.dpi) : "");
+                  }}
+                >
+                  Reset to current
                 </button>
               )}
             </div>
@@ -263,7 +324,7 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
                   min={DPI_MIN}
                   max={DPI_MAX}
                   step={DPI_STEP}
-                  placeholder="Not set"
+                  placeholder="e.g. 1600"
                   value={dpiInput}
                   onInput={(event) => setDpiInput((event.target as HTMLInputElement).value)}
                 />
@@ -276,7 +337,7 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
                     min={DPI_MIN}
                     max={DPI_MAX}
                     step={DPI_STEP}
-                    placeholder="Not set"
+                    placeholder="e.g. 1600"
                     value={dpiYInput}
                     onInput={(event) => setDpiYInput((event.target as HTMLInputElement).value)}
                   />
@@ -291,12 +352,6 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
                 <span class="setting-title">Polling rate</span>
               </div>
               <div class="performance-chip-group">
-                <button
-                  class={`performance-chip ${pollingRateHz === undefined ? "active" : ""}`}
-                  onClick={() => setPollingRateHz(undefined)}
-                >
-                  Not set
-                </button>
                 {status.supportedPollingRates.map((hz) => (
                   <button
                     key={hz}
@@ -318,12 +373,6 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
                 <>
                   <span class="sensor-panel-title">Gaming surface</span>
                   <div class="performance-chip-group">
-                    <button
-                      class={`performance-chip ${gamingSurfaceMode === undefined ? "active" : ""}`}
-                      onClick={() => setGamingSurfaceMode(undefined)}
-                    >
-                      Not set
-                    </button>
                     {GAMING_SURFACE_MODES.map((mode) => (
                       <button
                         key={mode}
@@ -341,12 +390,6 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
                 <>
                   <span class="sensor-panel-title">Lift-off distance</span>
                   <div class="performance-chip-group">
-                    <button
-                      class={`performance-chip ${liftOffDistance === undefined ? "active" : ""}`}
-                      onClick={() => setLiftOffDistance(undefined)}
-                    >
-                      Not set
-                    </button>
                     {status.supportedLiftOffDistances.map((value) => (
                       <button
                         key={value}

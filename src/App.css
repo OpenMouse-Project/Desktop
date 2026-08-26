@@ -933,9 +933,18 @@ button:focus-visible {
   margin-bottom: 1.75rem;
 }
 
+/* align-items: stretch (the default) is load-bearing here, not
+   decorative — `position: sticky` can only stay pinned within the height
+   of its own parent box. With flex-start, .profile-art-col was only as
+   tall as its own content (the art), ending right where the art ends, so
+   .profile-art-sticky inside it had zero room to detach and pin once you
+   scrolled past that point — it just scrolled away with everything else.
+   CONFIRMED the actual cause of both the earlier scroll-jitter complaint
+   and "it isn't sticking at all" — not a WebKit quirk after all. Stretch
+   makes .profile-art-col as tall as .profile-content-col beside it, which
+   gives the sticky child room to actually stay put for the full scroll. */
 .profile-layout {
   display: flex;
-  align-items: flex-start;
   gap: 2rem;
 }
 
@@ -960,6 +969,19 @@ button:focus-visible {
 .profile-content-col {
   flex: 1;
   min-width: 0;
+  /* Uniform spacing via gap, not each child's own margin-bottom (some
+     have one, some don't — .setting-row and .sensor-panel didn't, so
+     they sat flush against whatever followed while .info-section/
+     .dpi-panel had a gap before it. CONFIRMED as the "boxes touching"
+     look). The `> *` reset stops those margins from stacking with gap
+     and doubling the space between sections that do have one. */
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.profile-content-col > * {
+  margin-bottom: 0;
 }
 
 .profile-hero-art {

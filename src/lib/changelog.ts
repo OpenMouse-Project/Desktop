@@ -26,6 +26,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     changes: [
       "New: game profiles now cover the full mouse — lift-off distance and gaming surface mode, alongside DPI and polling rate",
       "Game profile editor is now a full page instead of a popup, with the game's artwork alongside the controls and a device picker so you can target any connected mouse, not just whichever one happened to be active",
+      "Game profile fields now start pre-filled with your mouse's current settings instead of blank — edit from there rather than typing everything in from scratch",
       "Every game card in the Games tab is now clickable, not just its small settings icon",
       "Changelog now only lists what's actually new, not internal build fixes",
     ],
