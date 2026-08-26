@@ -234,3 +234,57 @@
 - `build-windows.yml` — runs on every push to main, sanity-checks compilation
 - `release.yml` — triggers on `v*.*.*` tags or `workflow_dispatch`, builds signed installers via `tauri-apps/tauri-action`, creates GitHub release as `github-actions[bot]`
 - Assets: `.exe` installer, `.msi` installer, `.sig` files, `latest.json` (for auto-updater)
+
+---
+
+## 2026-08-26
+
+### Device Control & Conflict Detection Session
+
+**~Evening** — Razer Viper Mini full device control, critical conflict modal, UX fixes.
+
+#### Razer Device Controls (wired to Production)
+
+- **`src/native-hid/razer-actions.ts`** (new) — Write actions: `setDpi`, `setPollingRate`, `setLighting` wrapping `RazerViperMiniHidClient`
+- **`src/components/DevicePerformanceTab.tsx`** — Brand-aware DPI (Razer 100–8500, Logitech 50–32000), staged-changes model, unified single DPI input
+- **`src/components/DeviceLightingTab.tsx`** (new) — Effect picker, color pickers, speed picker, staged-changes model, Apply/Revert bar
+- **`src/pages/OverviewPage.tsx`** — `canControl` includes `"Razer"`, imports/renders `DeviceLightingTab`, `ConflictingAppsModal`
+
+#### Conflicting Apps Detection & Critical Modal
+
+**Problem**: Razer Synapse (and other vendor software) locks HID access, causing OpenMouse to fail silently.
+
+**Rust backend** (`src-tauri/src/conflicting_apps.rs`):
+- `detect_conflicting_apps` command using `sysinfo` crate
+- Scans running processes against known vendor substrings (`razerappengine`, `rzenginemon`, `razer_elevation_service`, etc.)
+- Uses substring matching (`contains`) not exact match — vendor executables vary across versions
+- Registered in `src-tauri/src/lib.rs`
+
+**Frontend**:
+- `use-conflicting-apps.ts` — Polls every 3s, returns list of detected apps
+- `ConflictingAppsModal.tsx` — Full-screen critical modal (dark backdrop, can't click through)
+  - Shows AlertTriangle icon, step-by-step instructions, detected process badges
+  - On "I closed it" click → **immediate re-check** (no cooldown)
+  - If app still running → modal stays with "Come on bruh, just close the process" message
+  - Only disappears when process is actually gone
+
+#### UX Fixes
+
+**Back button redirect fix** (`src/hooks/use-mouse-connection.ts`):
+- `connect()` now only calls `setView("device")` for **new** connections, not background re-reads
+- Previously: auto-refresh interval fired `connect()` every 5s → unconditionally set `setView("device")` → yanked user back to device page after clicking "Devices" back button
+
+#### Files Changed
+
+| File | Change |
+|---|---|
+| `src/native-hid/razer-actions.ts` | New: Razer HID write actions (setDpi, setPollingRate, setLighting) |
+| `src/components/DevicePerformanceTab.tsx` | Brand-aware DPI, staged-changes, unified input |
+| `src/components/DeviceLightingTab.tsx` | New: Razer lighting controls with apply bar |
+| `src/components/ConflictingAppsModal.tsx` | New: critical modal with strict re-check |
+| `src/hooks/use-conflicting-apps.ts` | New: polls detect_conflicting_apps every 3s |
+| `src/pages/OverviewPage.tsx` | Razer canControl, lighting tab, modal integration |
+| `src/hooks/use-mouse-connection.ts` | Fix: auto-refresh no longer forces view to "device" |
+| `src-tauri/src/conflicting_apps.rs` | New: detect_conflicting_apps command |
+| `src-tauri/src/lib.rs` | Registered conflicting_apps command |
+| `src/App.css` | Modal styles, apply bar, input focus glow |

@@ -1,129 +1,100 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
+import { AlertTriangle } from "lucide-preact";
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
 import {
-  setDpi,
+  setDpi as logitechSetDpi,
   setGamingSurfaceMode,
   setLiftOffDistance,
-  setPollingRate,
-  type GamingSurfaceMode,
-  type LiftOffDistance,
+  setPollingRate as logitechSetPollingRate,
 } from "../native-hid/logitech-actions";
+import {
+  setDpi as razerSetDpi,
+  setPollingRate as razerSetPollingRate,
+} from "../native-hid/razer-actions";
 import { showToast } from "../lib/toast";
-import { DPI_MAX, DPI_MIN, DPI_PRESETS, DPI_STEP, GAMING_SURFACE_MODES } from "../lib/logitech-controls";
+import { DPI_MAX as LOGITECH_DPI_MAX, DPI_MIN as LOGITECH_DPI_MIN, DPI_PRESETS as LOGITECH_DPI_PRESETS, DPI_STEP as LOGITECH_DPI_STEP, GAMING_SURFACE_MODES } from "../lib/logitech-controls";
 
 interface Props {
   info: HidInterfaceInfo;
   status: MouseStatus;
-  /** Patches the cached status with the value the device actually applied. */
+  brand: string;
   onApplied: (patch: Partial<MouseStatus>) => void;
-  /** Name of the game whose profile currently owns the mouse's live settings, if any — see use-game-watcher.ts. */
   lockedBy?: string;
-  /** When true, controls are disabled (device doesn't support live writes). */
   readOnly?: boolean;
 }
 
-/**
- * Writable controls for the settings a Logitech HID++ mouse can change live
- * (no flash write, no "confirm with the user first" warning in the driver's
- * own docs — see native-hid/logitech-actions.ts). Each control opens its own
- * short-lived connection per edit, same as a status read; only one write is
- * ever in flight at a time (see the `pending` guard below) since two of this
- * tab's own controls sharing the same open device handle at once risks the
- * same cross-talk `hid.rs`'s dedup fix exists for on the read side.
- *
- * These controls ARE the "default" a game profile (lib/game-profiles.ts)
- * restores to when the game closes — editing them while a profile has
- * already taken over would just get silently overwritten again next launch
- * and, worse, redefine what "default" even means mid-override. `lockedBy`
- * disables every control here for exactly as long as that's true, rather
- * than let a value someone changes here quietly stop meaning anything.
- */
-export function DevicePerformanceTab({ info, status, onApplied, lockedBy, readOnly }: Props) {
+export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy, readOnly }: Props) {
   const locked = lockedBy !== undefined;
-  const [pending, setPending] = useState<"dpi" | "rate" | "lod" | "surface" | null>(null);
-  const [dpiXInput, setDpiXInput] = useState(String(status.dpi));
-  const [dpiYInput, setDpiYInput] = useState(String(status.dpiY ?? status.dpi));
-  // The connection's background auto-refresh (use-mouse-connection.ts, every
-  // 5s, paused while this tab is open — see OverviewPage) could otherwise
-  // land while the user has typed a new value but not hit Apply yet and
-  // silently wipe it back to the device's current value. Belt-and-suspenders
-  // even with that pause in place.
-  const dpiXFocused = useRef(false);
-  const dpiYFocused = useRef(false);
+  const [pending, setPending] = useState(false);
 
-  // Keep the editable fields in sync with the cached status — including
-  // after this same control's own apply corrects it to whatever the device
-  // actually accepted — but only while the user isn't actively typing.
-  useEffect(() => {
-    if (!dpiXFocused.current) setDpiXInput(String(status.dpi));
-  }, [status.dpi]);
-  useEffect(() => {
-    if (!dpiYFocused.current) setDpiYInput(String(status.dpiY ?? status.dpi));
-  }, [status.dpiY, status.dpi]);
+  // Staged values — what the user has selected but NOT yet applied to the device.
+  const [stagedDpi, setStagedDpi] = useState(status.dpi);
+  const [stagedPollingRate, setStagedPollingRate] = useState(status.pollingRateHz);
+  const [stagedLod, setStagedLod] = useState(status.liftOffDistance);
+  const [stagedSurface, setStagedSurface] = useState(status.gamingSurfaceMode);
 
-  async function applyDpiValues(dpi: number, dpiY?: number) {
-    if (!Number.isFinite(dpi) || dpi <= 0) return;
-    if (dpi === status.dpi && (dpiY === undefined || dpiY === (status.dpiY ?? status.dpi))) return;
-    setPending("dpi");
+  // Keep staging in sync with device status (after a successful apply or background refresh).
+  useEffect(() => { setStagedDpi(status.dpi); }, [status.dpi]);
+  useEffect(() => { setStagedPollingRate(status.pollingRateHz); }, [status.pollingRateHz]);
+  useEffect(() => { setStagedLod(status.liftOffDistance); }, [status.liftOffDistance]);
+  useEffect(() => { setStagedSurface(status.gamingSurfaceMode); }, [status.gamingSurfaceMode]);
+
+  const isRazer = brand === "Razer";
+  const dpiPresets = isRazer ? [400, 800, 1600, 3200, 6400, 8000] : LOGITECH_DPI_PRESETS;
+  const dpiMin = isRazer ? 100 : LOGITECH_DPI_MIN;
+  const dpiMax = isRazer ? 8500 : LOGITECH_DPI_MAX;
+  const dpiStep = isRazer ? 100 : LOGITECH_DPI_STEP;
+
+  const dirty =
+    stagedDpi !== status.dpi ||
+    stagedPollingRate !== status.pollingRateHz ||
+    stagedLod !== status.liftOffDistance ||
+    stagedSurface !== status.gamingSurfaceMode;
+
+  const busy = pending || locked || readOnly;
+
+  function revert() {
+    setStagedDpi(status.dpi);
+    setStagedPollingRate(status.pollingRateHz);
+    setStagedLod(status.liftOffDistance);
+    setStagedSurface(status.gamingSurfaceMode);
+  }
+
+  async function applyAll() {
+    setPending(true);
     try {
-      const applied = await setDpi(info, Math.round(dpi), dpiY !== undefined ? Math.round(dpiY) : undefined);
-      onApplied({ dpi: applied });
-      showToast(`DPI set to ${applied}.`, "success");
+      const setDpi = brand === "Razer" ? razerSetDpi : logitechSetDpi;
+      const setPollingRate = brand === "Razer" ? razerSetPollingRate : logitechSetPollingRate;
+      const patch: Partial<MouseStatus> = {};
+
+      if (stagedDpi !== status.dpi) {
+        const applied = await setDpi(info, Math.round(stagedDpi));
+        patch.dpi = applied;
+      }
+      if (stagedPollingRate !== status.pollingRateHz) {
+        const applied = await setPollingRate(info, stagedPollingRate);
+        patch.pollingRateHz = applied;
+      }
+      if (stagedLod !== status.liftOffDistance && stagedLod != null) {
+        const applied = await setLiftOffDistance(info, stagedLod);
+        patch.liftOffDistance = applied;
+      }
+      if (stagedSurface !== status.gamingSurfaceMode && stagedSurface != null) {
+        const applied = await setGamingSurfaceMode(info, stagedSurface);
+        patch.gamingSurfaceMode = applied;
+      }
+
+      if (Object.keys(patch).length > 0) {
+        onApplied(patch);
+        showToast("Settings applied.", "success");
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error");
     } finally {
-      setPending(null);
+      setPending(false);
     }
   }
-
-  async function applyPollingRate(hz: number) {
-    if (hz === status.pollingRateHz) return;
-    setPending("rate");
-    try {
-      const applied = await setPollingRate(info, hz);
-      onApplied({ pollingRateHz: applied });
-      showToast(`Polling rate set to ${applied} Hz.`, "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err), "error");
-    } finally {
-      setPending(null);
-    }
-  }
-
-  async function applyLiftOffDistance(value: LiftOffDistance) {
-    if (value === status.liftOffDistance) return;
-    setPending("lod");
-    try {
-      const applied = await setLiftOffDistance(info, value);
-      onApplied({ liftOffDistance: applied });
-      showToast(`Lift-off distance set to ${applied}.`, "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err), "error");
-    } finally {
-      setPending(null);
-    }
-  }
-
-  async function applyGamingSurfaceMode(mode: GamingSurfaceMode) {
-    if (mode === status.gamingSurfaceMode) return;
-    setPending("surface");
-    try {
-      const applied = await setGamingSurfaceMode(info, mode);
-      onApplied({ gamingSurfaceMode: applied });
-      showToast(`Gaming surface set to ${applied}.`, "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err), "error");
-    } finally {
-      setPending(null);
-    }
-  }
-
-  // Folding `locked` and `readOnly` into `busy` disables every control below
-  // (they all already gate on `busy`) without needing to touch each one individually.
-  const busy = pending !== null || locked || readOnly;
-  const isCustomDpi = !DPI_PRESETS.includes(status.dpi);
-  const showSeparateAxes = status.supportsSeparateDpiAxes === true;
 
   return (
     <div class="performance-tab">
@@ -139,6 +110,7 @@ export function DevicePerformanceTab({ info, status, onApplied, lockedBy, readOn
         </p>
       )}
 
+      {/* ── DPI ──────────────────────────────────────────────────── */}
       <div class="dpi-panel">
         <div class="dpi-panel-header">
           <div class="setting-label">
@@ -146,18 +118,20 @@ export function DevicePerformanceTab({ info, status, onApplied, lockedBy, readOn
             <span class="setting-title">Sensitivity</span>
           </div>
           <div class="dpi-panel-value-group">
-            <span class="dpi-panel-value">{status.dpi.toLocaleString()} DPI</span>
-            {isCustomDpi && <span class="dpi-panel-badge">Custom</span>}
+            <span class={`dpi-panel-value ${stagedDpi !== status.dpi ? "dpi-panel-value--dirty" : ""}`}>
+              {stagedDpi.toLocaleString()} DPI
+            </span>
+            {!dpiPresets.includes(stagedDpi) && <span class="dpi-panel-badge">Custom</span>}
           </div>
         </div>
 
         <div class="dpi-preset-grid">
-          {DPI_PRESETS.map((preset) => (
+          {dpiPresets.map((preset) => (
             <button
               key={preset}
-              class={`dpi-preset ${preset === status.dpi ? "active" : ""}`}
+              class={`dpi-preset ${preset === stagedDpi ? "active" : ""}`}
               disabled={busy}
-              onClick={() => void applyDpiValues(preset, showSeparateAxes ? preset : undefined)}
+              onClick={() => setStagedDpi(preset)}
             >
               {preset.toLocaleString()}
             </button>
@@ -166,53 +140,28 @@ export function DevicePerformanceTab({ info, status, onApplied, lockedBy, readOn
 
         <div class="dpi-axis-row">
           <label class="dpi-axis-field">
-            <span>{showSeparateAxes ? "X axis" : "DPI"}</span>
+            <span>Custom DPI ({dpiMin}–{dpiMax.toLocaleString()})</span>
             <input
               type="number"
-              min={DPI_MIN}
-              max={DPI_MAX}
-              step={DPI_STEP}
-              value={dpiXInput}
+              min={dpiMin}
+              max={dpiMax}
+              step={dpiStep}
+              placeholder={`e.g. ${dpiPresets[2]}`}
+              value={String(stagedDpi)}
               disabled={busy}
-              onFocus={() => { dpiXFocused.current = true; }}
-              onBlur={() => { dpiXFocused.current = false; }}
-              onInput={(event) => setDpiXInput((event.target as HTMLInputElement).value)}
-              onKeyDown={(event) => { if (event.key === "Enter") void applyDpiValues(Number(dpiXInput), showSeparateAxes ? Number(dpiYInput) : undefined); }}
+              onInput={(e) => {
+                const v = Number((e.target as HTMLInputElement).value);
+                if (Number.isFinite(v) && v > 0) setStagedDpi(v);
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter") void applyAll(); }}
             />
           </label>
-          {showSeparateAxes && (
-            <label class="dpi-axis-field">
-              <span>Y axis</span>
-              <input
-                type="number"
-                min={DPI_MIN}
-                max={DPI_MAX}
-                step={DPI_STEP}
-                value={dpiYInput}
-                disabled={busy}
-                onFocus={() => { dpiYFocused.current = true; }}
-                onBlur={() => { dpiYFocused.current = false; }}
-                onInput={(event) => setDpiYInput((event.target as HTMLInputElement).value)}
-                onKeyDown={(event) => { if (event.key === "Enter") void applyDpiValues(Number(dpiXInput), Number(dpiYInput)); }}
-              />
-            </label>
-          )}
-          <button
-            class="connect-button dpi-apply-button"
-            disabled={busy || !dpiXInput || (showSeparateAxes && !dpiYInput)}
-            onClick={() => void applyDpiValues(Number(dpiXInput), showSeparateAxes ? Number(dpiYInput) : undefined)}
-          >
-            {pending === "dpi" ? "Applying…" : "Apply"}
-          </button>
         </div>
 
-        <p class="dpi-current-caption">
-          {showSeparateAxes
-            ? `Current X ${status.dpi} · Y ${status.dpiY ?? status.dpi} DPI`
-            : `Current ${status.dpi} DPI`}
-        </p>
+        <p class="dpi-current-caption">Current {status.dpi} DPI</p>
       </div>
 
+      {/* ── Polling rate ─────────────────────────────────────────── */}
       {status.supportedPollingRates && status.supportedPollingRates.length > 0 && (
         <div class="setting-row">
           <div class="setting-label">
@@ -223,9 +172,9 @@ export function DevicePerformanceTab({ info, status, onApplied, lockedBy, readOn
             {status.supportedPollingRates.map((hz) => (
               <button
                 key={hz}
-                class={`performance-chip ${hz === status.pollingRateHz ? "active" : ""}`}
+                class={`performance-chip ${hz === stagedPollingRate ? "active" : ""}`}
                 disabled={busy}
-                onClick={() => void applyPollingRate(hz)}
+                onClick={() => setStagedPollingRate(hz)}
               >
                 {hz} Hz
               </button>
@@ -234,6 +183,7 @@ export function DevicePerformanceTab({ info, status, onApplied, lockedBy, readOn
         </div>
       )}
 
+      {/* ── Sensor ───────────────────────────────────────────────── */}
       {(status.gamingSurfaceMode != null || (status.supportedLiftOffDistances && status.supportedLiftOffDistances.length > 0)) && (
         <div class="sensor-panel">
           <span class="setting-eyebrow">Sensor</span>
@@ -245,9 +195,9 @@ export function DevicePerformanceTab({ info, status, onApplied, lockedBy, readOn
                 {GAMING_SURFACE_MODES.map((mode) => (
                   <button
                     key={mode}
-                    class={mode === status.gamingSurfaceMode ? "active" : ""}
+                    class={mode === stagedSurface ? "active" : ""}
                     disabled={busy}
-                    onClick={() => void applyGamingSurfaceMode(mode)}
+                    onClick={() => setStagedSurface(mode)}
                   >
                     {mode}
                   </button>
@@ -266,9 +216,9 @@ export function DevicePerformanceTab({ info, status, onApplied, lockedBy, readOn
                 {status.supportedLiftOffDistances.map((value) => (
                   <button
                     key={value}
-                    class={value === status.liftOffDistance ? "active" : ""}
+                    class={value === stagedLod ? "active" : ""}
                     disabled={busy}
-                    onClick={() => void applyLiftOffDistance(value)}
+                    onClick={() => setStagedLod(value)}
                   >
                     {value}
                   </button>
@@ -279,6 +229,19 @@ export function DevicePerformanceTab({ info, status, onApplied, lockedBy, readOn
               </p>
             </>
           )}
+        </div>
+      )}
+
+      {/* ── Apply bar ────────────────────────────────────────────── */}
+      {dirty && !readOnly && (
+        <div class="apply-bar">
+          <span class="apply-bar-label"><AlertTriangle size={14} class="apply-bar-icon" /> You have unsaved changes</span>
+          <div class="apply-bar-actions">
+            <button class="apply-bar-revert" disabled={pending} onClick={revert}>Revert</button>
+            <button class="apply-bar-apply" disabled={pending} onClick={() => void applyAll()}>
+              {pending ? "Applying…" : "Apply Changes"}
+            </button>
+          </div>
         </div>
       )}
     </div>
