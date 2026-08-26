@@ -1,16 +1,79 @@
 import { useEffect, useState } from "preact/hooks";
-import { ArrowLeft, Battery, Gamepad2, Info, RefreshCw, SlidersHorizontal, Lightbulb, Layers, MousePointerClick, Usb } from "lucide-preact";
+import { ArrowLeft, Battery, Gamepad2, Info, RefreshCw, SlidersHorizontal, Lightbulb, Layers, MousePointerClick, Usb, Gauge, Zap, Palette } from "lucide-preact";
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import type { MouseConnection } from "../hooks/use-mouse-connection";
 import type { ActiveGameOverride } from "../hooks/use-game-watcher";
 import { deviceImage, UNKNOWN_DEVICE_IMAGE } from "../native-hid/device-images";
 import { DevicePerformanceTab } from "../components/DevicePerformanceTab";
+import { DeviceLightingTab } from "../components/DeviceLightingTab";
+import { ConflictingAppsModal } from "../components/ConflictingAppsModal";
+import { useConflictingApps } from "../hooks/use-conflicting-apps";
 
 function fallbackToUnknownDevice(event: Event) {
   const img = event.currentTarget as HTMLImageElement;
   if (img.src.endsWith(UNKNOWN_DEVICE_IMAGE)) return;
   img.src = UNKNOWN_DEVICE_IMAGE;
 }
+
+/** Brand → typical feature set shown in the device list before connecting. */
+const BRAND_FEATURES: Record<string, { icon: typeof Gauge; label: string }[]> = {
+  Logitech: [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+    { icon: Palette, label: "LIGHTSYNC" },
+    { icon: Layers, label: "Profiles" },
+  ],
+  Razer: [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+    { icon: Palette, label: "Chroma RGB" },
+  ],
+  Pulsar: [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+  ],
+  "Endgame Gear": [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+  ],
+  Lamzu: [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+  ],
+  Ninjutso: [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+  ],
+  WLMouse: [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+  ],
+  Wooting: [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+    { icon: Layers, label: "Profiles" },
+  ],
+  ATK: [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+  ],
+  "Attack Shark": [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+  ],
+  Fantech: [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+  ],
+  Keychron: [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+  ],
+  "G-Wolves": [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+  ],
+};
 
 type DeviceTab = "overview" | "performance" | "lighting" | "profiles" | "buttons";
 
@@ -86,6 +149,7 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
     setAutoRefreshPaused,
   } = connection;
   const [deviceTab, setDeviceTab] = useState<DeviceTab>("overview");
+  const { apps: conflictingApps, dismiss: dismissConflicting } = useConflictingApps();
 
   useEffect(() => {
     setDeviceTab("overview");
@@ -99,7 +163,7 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
   // ── Connected device dashboard ──────────────────────────────────────
   if (view === "device" && connected) {
     const { status } = connected;
-    const canControl = connected.brand === "Logitech" && connectedInfo !== null;
+    const canControl = (connected.brand === "Logitech" || connected.brand === "Razer") && connectedInfo !== null;
     const infoRows = statusDetailRows(status);
 
     // Capability-driven tab list
@@ -111,7 +175,10 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
       status.gamingSurfaceMode != null;
     if (hasPerformance) tabs.push({ id: "performance", icon: SlidersHorizontal, label: "Performance" });
 
-    if (status.lighting || (status.lightingZones && status.lightingZones.length > 0)) {
+    const hasLighting = !!(status.lighting) ||
+      (status.lightingZones && status.lightingZones.length > 0) ||
+      connected.brand === "Razer";
+    if (hasLighting) {
       tabs.push({ id: "lighting", icon: Lightbulb, label: "Lighting" });
     }
 
@@ -140,6 +207,9 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
             </button>
           ))}
         </nav>
+
+        {/* Conflicting apps warning */}
+        <ConflictingAppsModal apps={conflictingApps} onDismissed={dismissConflicting} />
 
         {/* ── Overview tab ───────────────────────────────────────── */}
         {deviceTab === "overview" && (
@@ -244,19 +314,29 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
           <DevicePerformanceTab
             info={connectedInfo}
             status={status}
+            brand={connected.brand}
             onApplied={patchStatus}
             lockedBy={activeGameOverride?.gameName}
             readOnly={!canControl}
           />
         )}
 
-        {/* ── Lighting tab (placeholder) ──────────────────────────── */}
+        {/* ── Lighting tab ──────────────────────────────────────── */}
         {deviceTab === "lighting" && (
-          <div class="tab-placeholder">
-            <Lightbulb size={32} aria-hidden="true" />
-            <h2>Lighting</h2>
-            <p>Lighting controls coming soon for this device.</p>
-          </div>
+          connectedInfo ? (
+            <DeviceLightingTab
+              info={connectedInfo}
+              status={status}
+              onApplied={patchStatus}
+              readOnly={!canControl}
+            />
+          ) : (
+            <div class="tab-placeholder">
+              <Lightbulb size={32} aria-hidden="true" />
+              <h2>Lighting</h2>
+              <p>Connecting to device… lighting controls will appear shortly.</p>
+            </div>
+          )
         )}
 
         {/* ── Profiles tab (placeholder) ──────────────────────────── */}
@@ -317,38 +397,53 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
         <>
           <h1 class="page-title">Devices</h1>
           <ul class="device-list">
-            {list.candidates.map((candidate) => (
-              <li class="device-list-row" key={candidate.info.key}>
-                <div class="device-list-row-main">
-                  <img
-                    class="device-list-row-image"
-                    src={deviceImage(candidate.info.key, candidate.info.productString)}
-                    onError={fallbackToUnknownDevice}
-                    alt=""
-                  />
-                  <div class="device-list-row-info">
-                    <span class="device-list-row-name">
-                      {candidate.info.productString || "Unknown device"}
-                    </span>
-                    <span class="device-list-row-meta">
-                      {candidate.brands.join(" / ")} · {candidate.info.vendorId.toString(16).padStart(4, "0")}:
-                      {candidate.info.productId.toString(16).padStart(4, "0")}
-                    </span>
+            {list.candidates.map((candidate) => {
+              const primaryBrand = candidate.brands[0];
+              const features = primaryBrand ? BRAND_FEATURES[primaryBrand] : undefined;
+              return (
+                <li class="device-list-row" key={candidate.info.key}>
+                  <div class="device-list-row-main">
+                    <img
+                      class="device-list-row-image"
+                      src={deviceImage(candidate.info.key, candidate.info.productString)}
+                      onError={fallbackToUnknownDevice}
+                      alt=""
+                    />
+                    <div class="device-list-row-info">
+                      <span class="device-list-row-name">
+                        {candidate.info.productString || "Unknown device"}
+                      </span>
+                      <span class="device-list-row-meta">
+                        {candidate.brands.join(" / ")} · {candidate.info.vendorId.toString(16).padStart(4, "0")}:
+                        {candidate.info.productId.toString(16).padStart(4, "0")}
+                      </span>
+                    </div>
                   </div>
-                </div>
-                <button
-                  class="connect-button"
-                  disabled={connectingKey === candidate.info.key}
-                  onClick={() => select(candidate)}
-                >
-                  {connectingKey === candidate.info.key
-                    ? "Connecting…"
-                    : connected?.key === candidate.info.key
-                      ? "View"
-                      : "Connect"}
-                </button>
-              </li>
-            ))}
+                  <div class="device-list-row-tags">
+                    {features && (
+                      <div class="device-capability-tags">
+                        {features.map((f) => (
+                          <span key={f.label} class="device-capability-tag">
+                            <f.icon size={11} /> {f.label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    class="connect-button"
+                    disabled={connectingKey === candidate.info.key}
+                    onClick={() => select(candidate)}
+                  >
+                    {connectingKey === candidate.info.key
+                      ? "Connecting…"
+                      : connected?.key === candidate.info.key
+                        ? "View"
+                        : "Connect"}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </>
       )}

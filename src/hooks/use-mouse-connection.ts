@@ -96,7 +96,10 @@ export function useMouseConnection() {
       setConnected(device);
       lastCandidateRef.current = candidate;
       rememberDevice(candidate.info, device.brand);
-      setView("device");
+      // Only switch to the device view on a *new* connection — background
+      // re-reads of the already-connected device must not yank the user back
+      // to the device page when they've navigated to the list.
+      if (!isRefresh) setView("device");
       if (!opts?.silent) {
         showToast(isRefresh ? `${device.status.name} refreshed.` : `Connected to ${device.status.name}.`, "success");
       }

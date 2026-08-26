@@ -141,7 +141,7 @@ export const BRAND_DRIVERS: BrandEntry[] = [
   // collection (page 0x01, usage 0x02). Non-exclusive open (set at HidApi
   // init) prevents the cursor-freeze that exclusive mode caused.
   { brand: "Razer", vendorIds: [0x1532], candidates: [
-    client("RazerHidClient", RazerHidClient),
+    client("RazerHidClient", RazerHidClient, [0x008a]),
     client("RazerCobraHidClient", RazerCobraHidClient),
     client("RazerViperMiniHidClient", RazerViperMiniHidClient),
     client("RazerViperHidClient", RazerViperHidClient),

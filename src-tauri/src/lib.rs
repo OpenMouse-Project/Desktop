@@ -7,6 +7,7 @@ use tauri::{AppHandle, LogicalSize, Manager, Size, State, WebviewWindow, WindowE
 
 #[macro_use]
 mod applog;
+mod conflicting_apps;
 mod discord_rpc;
 mod games;
 mod hid;
@@ -146,6 +147,7 @@ pub fn run() {
             applog::export_logs,
             games::running_process_names,
             games::scan_installed_games,
+            conflicting_apps::detect_conflicting_apps,
             resource_monitor::sample_resource_usage,
         ])
         .setup(|app| {

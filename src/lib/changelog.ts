@@ -21,6 +21,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.17",
+    date: "2026-08-26",
+    changes: [
+      "New: Razer Viper Mini DPI, polling rate, and Chroma RGB lighting control — the lighting tab now works with full effect selection and color pickers",
+      "New: custom radial color picker — circular hue/saturation wheel with lightness slider, replacing the default browser color input",
+      "New: conflicting software detection — OpenMouse now warns when Razer Synapse or other vendor apps are running and blocking device access",
+      "New: device list shows supported capabilities (DPI, Polling Rate, Lighting, Profiles) for each detected device before connecting",
+      "New: device list shows larger device artwork with green accent border glow",
+      "Fixed: clicking 'Devices' back button no longer auto-redirects back to the device page",
+      "Fixed: minimum window size enforced (720×500) to prevent UI breakage at small sizes",
+    ],
+  },
+  {
     version: "0.0.16",
     date: "2026-08-25",
     changes: [
