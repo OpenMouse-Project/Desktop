@@ -60,16 +60,13 @@ jobs:
           prerelease: false
 
   # The Windows job above only produces the .msi/.exe installers. This job
-  # builds the Linux .AppImage so the same `v*.*.*` tag also releases a
-  # distro-agnostic Linux build without anyone needing a local Linux box.
-  # Both jobs run with releaseDraft: true and the same tagName —
+  # builds the Linux .deb/.rpm/.AppImage so the same `v*.*.*` tag also
+  # releases a distro-agnostic Linux build without anyone needing a local
+  # Linux box. Both jobs run with releaseDraft: true and the same tagName —
   # tauri-action coalesces them onto one Release: the first leg to finish
   # creates the (draft) tag/release, the other leg uploads its artifacts to
   # it. The `publish` job below then flips the combined draft to a live
-  # release once every leg is done. (The updater doesn't support AppImage,
-  # so this job deliberately skips the signing env vars — the AppImage is
-  # just a release asset, not an update channel. The Windows job's signing
-  # env keeps generating latest.json regardless.)
+  # release once every leg is done.
   linux-appimage:
     runs-on: ubuntu-latest
     permissions:
@@ -110,6 +107,13 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # tauri.conf.json has a signing public key baked in (for the
+          # Windows auto-updater), so Tauri insists on signing every bundle —
+          # AppImage included — and fails without the private key. Same repo
+          # secrets as the Windows job; the AppImage pickups an honest
+          # signature alongside it, no extra cost.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
           releaseName: "OpenMouse Desktop v__VERSION__"
