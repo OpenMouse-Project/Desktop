@@ -173,7 +173,7 @@ export function useGameWatcher(connection: MouseConnection) {
       const profile = getGameProfile(game.id);
       if (!profile?.autoApply || !isProfileMeaningful(profile)) return;
       const { connected, connectedInfo, patchStatus } = connectionRef.current;
-      const canControl = connected?.brand === "Logitech" && connectedInfo !== null;
+      const canControl = connectedInfo !== null;
       if (!canControl || !connectedInfo || !connected) return;
 
       // The first game to take over is the one whose "before" snapshot
@@ -214,8 +214,8 @@ export function useGameWatcher(connection: MouseConnection) {
       const restoreProfile: GameProfile = { ...active.restore, autoApply: false };
       if (!isProfileMeaningful(restoreProfile)) return;
 
-      const { connected, connectedInfo, patchStatus } = connectionRef.current;
-      const canControl = connected?.brand === "Logitech" && connectedInfo !== null;
+      const { connectedInfo, patchStatus } = connectionRef.current;
+      const canControl = connectedInfo !== null;
       if (!canControl || !connectedInfo) return;
 
       try {

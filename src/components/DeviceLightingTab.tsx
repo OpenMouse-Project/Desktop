@@ -2,7 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { AlertTriangle } from "lucide-preact";
 import type { MouseLighting, MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
-import { setLighting as razerSetLighting } from "../native-hid/razer-actions";
+import { setLighting } from "../native-hid/write";
 import { showToast } from "../lib/toast";
 import { RadialColorPicker } from "./RadialColorPicker";
 
@@ -70,7 +70,7 @@ export function DeviceLightingTab({ info, status, onApplied, readOnly }: Props) 
         speed: showSpeed ? stagedSpeed : null,
         writeOnly: lighting!.writeOnly,
       };
-      const applied = await razerSetLighting(info, patch);
+      const applied = await setLighting(info, patch);
       onApplied({ lighting: applied });
       showToast("Lighting applied.", "success");
     } catch (err) {

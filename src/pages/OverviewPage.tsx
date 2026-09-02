@@ -1,11 +1,13 @@
 import { useEffect, useState } from "preact/hooks";
-import { ArrowLeft, Battery, Gamepad2, Info, RefreshCw, SlidersHorizontal, Lightbulb, Layers, MousePointerClick, Usb, Gauge, Zap, Palette } from "lucide-preact";
+import { ArrowLeft, Battery, Gamepad2, Info, RefreshCw, Settings2, SlidersHorizontal, Lightbulb, Layers, MousePointerClick, Usb, Gauge, Zap, Palette } from "lucide-preact";
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import type { MouseConnection } from "../hooks/use-mouse-connection";
 import type { ActiveGameOverride } from "../hooks/use-game-watcher";
 import { deviceImage, UNKNOWN_DEVICE_IMAGE } from "../native-hid/device-images";
 import { DevicePerformanceTab } from "../components/DevicePerformanceTab";
 import { DeviceLightingTab } from "../components/DeviceLightingTab";
+import { DeviceAdvancedTab } from "../components/DeviceAdvancedTab";
+import { DeviceButtonsTab } from "../components/DeviceButtonsTab";
 import { ConflictingAppsModal } from "../components/ConflictingAppsModal";
 import { useConflictingApps } from "../hooks/use-conflicting-apps";
 
@@ -75,7 +77,7 @@ const BRAND_FEATURES: Record<string, { icon: typeof Gauge; label: string }[]> = 
   ],
 };
 
-type DeviceTab = "overview" | "performance" | "lighting" | "profiles" | "buttons";
+type DeviceTab = "overview" | "performance" | "advanced" | "lighting" | "profiles" | "buttons";
 
 interface TabDef {
   id: DeviceTab;
@@ -163,7 +165,12 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
   // ── Connected device dashboard ──────────────────────────────────────
   if (view === "device" && connected) {
     const { status } = connected;
-    const canControl = (connected.brand === "Logitech" || connected.brand === "Razer") && connectedInfo !== null;
+    // Any driver-backed brand can now be written, not just Logitech/Razer —
+    // the generic write layer (native-hid/write.ts) exposes the shared
+    // setter surface across every candidate driver, and each tab gates its
+    // individual controls on the status fields the device actually reports
+    // (so a brand without, say, motion sync simply doesn't get that slider).
+    const canControl = connectedInfo !== null;
     const infoRows = statusDetailRows(status);
 
     // Capability-driven tab list
@@ -172,8 +179,35 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
     const hasPerformance = status.dpi > 0 ||
       (status.supportedPollingRates && status.supportedPollingRates.length > 0) ||
       status.liftOffDistance != null ||
-      status.gamingSurfaceMode != null;
+      status.gamingSurfaceMode != null ||
+      status.debounceMs != null ||
+      status.sleepTimeout != null ||
+      status.motionSync != null ||
+      status.angleSnapping != null ||
+      status.rippleControl != null ||
+      status.performanceMode != null ||
+      status.hyperMode != null ||
+      status.sensorMode != null ||
+      status.usbSpeed != null ||
+      status.primaryButton != null ||
+      (status.dpiStages && status.dpiStages.length > 0);
     if (hasPerformance) tabs.push({ id: "performance", icon: SlidersHorizontal, label: "Performance" });
+
+    const hasAdvanced =
+      typeof status.slamclickFilter === "boolean" ||
+      typeof status.motionJitterFilter === "boolean" ||
+      Array.isArray(status.eggCpiStages) ||
+      Boolean(status.ninjutsoSystemMode) ||
+      Boolean(status.ninjutsoOpticalEngine) ||
+      status.ninjutsoHyperClick != null ||
+      Boolean(status.ninjutsoSlamClick) ||
+      status.finalmouseDongleLedMode != null ||
+      status.sensorMode != null ||
+      status.performanceDuration != null ||
+      status.dpiLedMode != null ||
+      status.wheelAcceleration != null ||
+      typeof status.activeProfile === "number";
+    if (hasAdvanced) tabs.push({ id: "advanced", icon: Settings2, label: "Advanced" });
 
     const hasLighting = !!(status.lighting) ||
       (status.lightingZones && status.lightingZones.length > 0) ||
@@ -321,6 +355,16 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
           />
         )}
 
+        {/* ── Advanced tab ─────────────────────────────────────── */}
+        {deviceTab === "advanced" && connectedInfo && (
+          <DeviceAdvancedTab
+            info={connectedInfo}
+            status={status}
+            onApplied={patchStatus}
+            readOnly={!canControl}
+          />
+        )}
+
         {/* ── Lighting tab ──────────────────────────────────────── */}
         {deviceTab === "lighting" && (
           connectedInfo ? (
@@ -348,13 +392,23 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
           </div>
         )}
 
-        {/* ── Buttons tab (placeholder) ───────────────────────────── */}
+        {/* ── Buttons tab ───────────────────────────────────────── */}
         {deviceTab === "buttons" && (
-          <div class="tab-placeholder">
-            <MousePointerClick size={32} aria-hidden="true" />
-            <h2>Buttons</h2>
-            <p>Button configuration coming soon for this device.</p>
-          </div>
+          connectedInfo ? (
+            <DeviceButtonsTab
+              info={connectedInfo}
+              status={status}
+              brand={connected.brand}
+              onApplied={patchStatus}
+              readOnly={!canControl}
+            />
+          ) : (
+            <div class="tab-placeholder">
+              <MousePointerClick size={32} aria-hidden="true" />
+              <h2>Buttons</h2>
+              <p>Connecting to device… button controls will appear shortly.</p>
+            </div>
+          )
         )}
       </section>
     );

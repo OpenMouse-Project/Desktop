@@ -61,7 +61,7 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
   const existing = getGameProfile(game.id);
   const { connected, connectedInfo, list, connectingKey, select } = connection;
   const status = connected?.status;
-  const canControl = connected?.brand === "Logitech" && connectedInfo !== null;
+  const canControl = connectedInfo !== null;
   const showSeparateAxes = status?.supportsSeparateDpiAxes === true;
 
   // "Not set" isn't a real state a field can be in — every field starts

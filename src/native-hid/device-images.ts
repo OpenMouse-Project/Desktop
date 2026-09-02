@@ -47,6 +47,9 @@ const DEVICE_IMAGES: ReadonlyMap<string, string> = new Map([
   ["3367:1964", "/devices/endgame-gear-op1-8k.png"],
   ["3367:1976", "/devices/endgame-gear-op1-8k.png"],
   ["3367:1978", "/devices/endgame-gear-op1-8k.png"],
+  // OP1we (same egg-we driver, 0x3367 family).
+  ["3367:1961", "/devices/endgame-gear-op1we.png"],
+  ["3367:1962", "/devices/endgame-gear-op1we.png"],
   // NinjaForce exposes separate wired and receiver ids for Sora V2, Sora V3,
   // and the TEN family. Receiver variants show the paired mouse artwork.
   ["1915:ae11", "/devices/ninjutso-sora-v2.png"],
@@ -66,6 +69,9 @@ const DEVICE_IMAGES: ReadonlyMap<string, string> = new Map([
   // WLMouse Beast G receiver / wired transports share the same shell.
   ["36a7:a860", "/devices/wlmouse-beast-g.png"],
   ["36a7:a861", "/devices/wlmouse-beast-g.png"],
+  // Beast Max wired / 4K8K receiver transports share the same shell.
+  ["36a7:a880", "/devices/wlmouse-beast-max.png"],
+  ["36a7:a881", "/devices/wlmouse-beast-max.png"],
   // Nape Pro wired / Link-KM receivers share the same shell artwork.
   ["3434:0440", "/devices/keychron-nape-pro.png"],
   ["3434:d026", "/devices/keychron-nape-pro.png"],
@@ -81,6 +87,44 @@ const DEVICE_IMAGES: ReadonlyMap<string, string> = new Map([
   // WALLHACK K-001 analog keyboard (both enumerated vendor ids).
   ["3879:0806", "/devices/wallhack-k-001.png"],
   ["1caa:0806", "/devices/wallhack-k-001.png"],
+  // Logitech G203 family. G203 LIGHTSYNC / PRODIGY and G102 share the same shell.
+  ["046d:c084", "/devices/logitech-g203.png"],
+  ["046d:c089", "/devices/logitech-g203.png"],
+  ["046d:c092", "/devices/logitech-g203.png"],
+  ["046d:c07e", "/devices/logitech-g402.png"],
+  ["046d:c080", "/devices/logitech-g303.png"],
+  ["046d:c08f", "/devices/logitech-g403.png"],
+  ["046d:c08e", "/devices/logitech-g903.png"],
+  // G Pro (2017), G Pro Hero, and G Pro Wireless share the same classic shell.
+  ["046d:c085", "/devices/logitech-g-pro.png"],
+  ["046d:c08c", "/devices/logitech-g-pro.png"],
+  // Endgame Gear XM2 8K wired.
+  ["3367:1966", "/devices/endgame-gear-xm2-8k.png"],
+  ["3367:1980", "/devices/endgame-gear-xm2-8k.png"],
+  // WLMouse Sword X wired / receiver transports keep their render.
+  ["36a7:a878", "/devices/wlmouse-sword-x.png"],
+  ["36a7:a879", "/devices/wlmouse-sword-x.png"],
+  // VGN Dragonfly F2 Master+ wired / receiver transports.
+  ["3554:fb56", "/devices/vgn-dragonfly-f2.png"],
+  ["3554:fb57", "/devices/vgn-dragonfly-f2.png"],
+  // Lamzu Maya X wired / wireless / 8K transports.
+  ["373e:001c", "/devices/lamzu-maya-x.png"],
+  ["373e:001d", "/devices/lamzu-maya-x.png"],
+  ["373e:001e", "/devices/lamzu-maya-x.png"],
+  ["1532:006e", "/devices/razer-deathadder-v2.png"],
+  ["1532:0071", "/devices/razer-deathadder-v2.png"],
+  ["1532:007c", "/devices/razer-deathadder-v2.png"],
+  ["1532:007d", "/devices/razer-deathadder-v2.png"],
+  ["1532:0084", "/devices/razer-deathadder-v2.png"],
+  ["1532:0098", "/devices/razer-deathadder-v2.png"],
+  // DeathAdder V4 Pro and its Carbon Fiber SKU share the same shell.
+  ["1532:00be", "/devices/razer-deathadder-v4-pro.png"],
+  ["1532:00bf", "/devices/razer-deathadder-v4-pro.png"],
+  ["1532:00ef", "/devices/razer-deathadder-v4-pro.png"],
+  ["1532:00f0", "/devices/razer-deathadder-v4-pro.png"],
+  ["1532:00b8", "/devices/razer-viper-v3-hyperspeed.png"],
+  ["1532:00e5", "/devices/razer-viper-v4-pro.png"],
+  ["1532:00e6", "/devices/razer-viper-v4-pro.png"],
 ]);
 
 export const UNKNOWN_DEVICE_IMAGE = "/devices/unknown-device.png";
@@ -103,6 +147,7 @@ export function deviceImage(key: string | null | undefined, displayName = ""): s
   if (/mx\s*master\s*4/i.test(displayName)) return "/devices/logitech-mx-master-4.png";
   if (/superstrike/i.test(displayName)) return "/devices/logitech-pro-x2-superstrike.png";
   if (/superlight/i.test(displayName)) return "/devices/logitech-pro-x-superlight-2c.png";
+  if (/op1we/i.test(displayName)) return "/devices/endgame-gear-op1we.png";
   if (/\bop1\b/i.test(displayName)) return "/devices/endgame-gear-op1-8k.png";
   if (/\bviper\s*v2\s*pro\b/i.test(displayName)) return "/devices/razer-viper-v2-pro.png";
   if (/\bviper\s*mini\b/i.test(displayName)) return "/devices/razer-viper-mini.webp";
@@ -118,5 +163,32 @@ export function deviceImage(key: string | null | undefined, displayName = ""): s
   // Pulsar 4K Wireless Receiver ships with the X2 V2 4K dongle kit; the
   // receiver product id is not yet published, so match the reported name.
   if (/pulsar/i.test(displayName)) return "/devices/pulsar-x2-v2.png";
+  // Newer supported-model artwork resolved from the reported product name. These
+  // run after the shared-receiver checks above but before the Pulsar/unknown
+  // catch-alls. Test-needed (likely) models are deliberately left out.
+  if (/\bg(?:102|203)\b/i.test(displayName)) return "/devices/logitech-g203.png";
+  if (/\bg303\b/i.test(displayName)) return "/devices/logitech-g303.png";
+  if (/\bg402\b/i.test(displayName)) return "/devices/logitech-g402.png";
+  if (/\bg403\b/i.test(displayName)) return "/devices/logitech-g403.png";
+  if (/\bg903\b/i.test(displayName)) return "/devices/logitech-g903.png";
+  if (/\bg30[45]\b/i.test(displayName)) return "/devices/logitech-g305.png";
+  if (/\bg309\b/i.test(displayName)) return "/devices/logitech-g309.png";
+  if (/\bg\s*pro\s*2\b/i.test(displayName)) return "/devices/logitech-g-pro-2.png";
+  if (/\bg\s*pro\b/i.test(displayName)) return "/devices/logitech-g-pro.png";
+  if (/\bmx\s*anywhere\s*3\b/i.test(displayName)) return "/devices/logitech-mx-anywhere-3.png";
+  if (/\bmx\s*ergo\b/i.test(displayName)) return "/devices/logitech-mx-ergo-s.png";
+  if (/\bdeathadder\s*v4\b/i.test(displayName)) return "/devices/razer-deathadder-v4-pro.png";
+  if (/\bdeathadder\s*v3\b(?!\s*pro\b)/i.test(displayName)) return "/devices/razer-deathadder-v3.png";
+  if (/\bdeathadder\s*v2\b(?!\s*x\s*hyperspeed\b)/i.test(displayName)) return "/devices/razer-deathadder-v2.png";
+  if (/\bdeathadder\s*essential\b/i.test(displayName)) return "/devices/razer-deathadder-v2.png";
+  if (/\bviper\s*v3\s*hyperspeed\b/i.test(displayName)) return "/devices/razer-viper-v3-hyperspeed.png";
+  if (/\bviper\s*v4\b/i.test(displayName)) return "/devices/razer-viper-v4-pro.png";
+  if (/\bxm2\s*8k\b/i.test(displayName)) return "/devices/endgame-gear-xm2-8k.png";
+  if (/\bsword\s*x\b/i.test(displayName)) return "/devices/wlmouse-sword-x.png";
+  if (/\bdragonfly\s*f2\b/i.test(displayName)) return "/devices/vgn-dragonfly-f2.png";
+  if (/\bmaya\s*x\b/i.test(displayName)) return "/devices/lamzu-maya-x.png";
+  if (/\bf1\s*v2\b/i.test(displayName)) return "/devices/atk-f1-v2-ultra-max.png";
+  if (/\b(finalmouse|starlight|ulx)\b/i.test(displayName)) return "/devices/finalmouse-ulx.png";
+  if (/\bbeast\s*max\b/i.test(displayName)) return "/devices/wlmouse-beast-max.png";
   return UNKNOWN_DEVICE_IMAGE;
 }

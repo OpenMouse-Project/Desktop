@@ -23,6 +23,130 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
 }
 
+/* ── Theme presets (activated via <html data-theme> by lib/themes.ts) ──
+   Each re-tints the whole palette — backgrounds, surfaces, borders and text
+   as well as the accent — not just one accent token, so switching feels like
+   a real theme. The custom-CSS feature (custom-theme-css <style>) can paint
+   over anything, preset included. */
+
+[data-theme="emerald"] {
+  --ink: #05080a;
+  --sidebar: #080c0e;
+  --card: #0c1113;
+  --raised: #10171a;
+  --control: #131b1f;
+  --hover: #1b252a;
+
+  --line: #243138;
+  --line-strong: #2f3e46;
+
+  --text: #f2f7f4;
+  --bright: #e8efea;
+  --dim: #b0bdb4;
+  --muted: #83938a;
+  --faint: #74857b;
+
+  --success: #6fdc93;
+  --warning: #e8c06b;
+  --accent: #58c97c;
+  --accent-ink: #06140b;
+}
+
+[data-theme="violet"] {
+  --ink: #08060c;
+  --sidebar: #0b0911;
+  --card: #0f0d17;
+  --raised: #151220;
+  --control: #181527;
+  --hover: #211c33;
+
+  --line: #2b2640;
+  --line-strong: #37304f;
+
+  --text: #f6f4fb;
+  --bright: #eeeafa;
+  --dim: #bfb8d4;
+  --muted: #9289ad;
+  --faint: #82799c;
+
+  --success: #8fda9f;
+  --warning: #e3c06e;
+  --accent: #a98bff;
+  --accent-ink: #120a2c;
+}
+
+[data-theme="ice"] {
+  --ink: #05090c;
+  --sidebar: #080c10;
+  --card: #0b1116;
+  --raised: #10171e;
+  --control: #131b23;
+  --hover: #1b2630;
+
+  --line: #243242;
+  --line-strong: #2e3e50;
+
+  --text: #f0f6fb;
+  --bright: #e5eef5;
+  --dim: #aebdca;
+  --muted: #8093a3;
+  --faint: #728493;
+
+  --success: #6fc3ff;
+  --warning: #e0c06e;
+  --accent: #54b6f5;
+  --accent-ink: #061420;
+}
+
+[data-theme="mono"] {
+  --ink: #080808;
+  --sidebar: #0c0c0c;
+  --card: #101010;
+  --raised: #151515;
+  --control: #181818;
+  --hover: #212121;
+
+  --line: #282828;
+  --line-strong: #333333;
+
+  --text: #f6f6f6;
+  --bright: #eaeaea;
+  --dim: #b4b4b4;
+  --muted: #858585;
+  --faint: #767676;
+
+  --success: #c9c9c9;
+  --warning: #c9c9c9;
+  --accent: #d6d6d6;
+  --accent-ink: #181818;
+}
+
+/* Light is the flip-the-palette theme — light surfaces, dark text, so the
+   whole shell inverts, not just an accent. */
+[data-theme="light"] {
+  --ink: #f7f7f4;
+  --sidebar: #efefea;
+  --card: #ffffff;
+  --raised: #fbfbf8;
+  --control: #ffffff;
+  --hover: #eaeae5;
+
+  --line: #dcdcd6;
+  --line-strong: #c8c8c1;
+
+  --text: #141414;
+  --bright: #1c1c1c;
+  --dim: #4a4a47;
+  --muted: #737370;
+  --faint: #888885;
+
+  --success: #2e9e5b;
+  --warning: #a8701f;
+  --accent: #d46a32;
+  --accent-ink: #fff5ee;
+  color-scheme: light;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -656,7 +780,14 @@ button:focus-visible {
    grid, feature tabs, controls) needs the room. Games/Settings stay at
    the shared width. */
 .page-overview {
-  max-width: 1100px;
+  max-width: none;
+  margin: 0;
+}
+
+/* Supported-mice catalog spans the full content panel like a document. */
+.page-supported {
+  max-width: none;
+  margin: 0;
 }
 
 .page-games {
@@ -1281,15 +1412,10 @@ button:focus-visible {
 .device-list {
   list-style: none;
   margin: 0;
-  padding: 0.35rem;
-  border: 1px solid #4ade80;
-  border-radius: 16px;
-  background: transparent;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
-  box-shadow: 0 0 14px color-mix(in srgb, #4ade80 30%, transparent),
-              0 0 4px color-mix(in srgb, #4ade80 12%, transparent);
+  background: transparent;
 }
 
 .device-list-row {
@@ -1297,9 +1423,14 @@ button:focus-visible {
   align-items: center;
   gap: 1rem;
   border: none;
-  border-radius: 12px;
-  padding: 0.7rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 0.8rem 0.25rem;
   background: transparent;
+}
+
+.device-list-row:last-child {
+  border-bottom: none;
 }
 
 .device-list-row:hover {
@@ -1350,10 +1481,10 @@ button:focus-visible {
 
 .device-list-row-image {
   flex-shrink: 0;
-  width: 110px;
-  height: 110px;
+  width: 42px;
+  height: 42px;
   object-fit: contain;
-  border-radius: 12px;
+  border-radius: 8px;
   background: none;
   border: none;
   padding: 0;
@@ -1661,6 +1792,75 @@ button:focus-visible {
 .performance-chip:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.performance-select {
+  border: 1px solid var(--line);
+  background: var(--control);
+  color: var(--dim);
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  max-width: 320px;
+  justify-self: flex-end;
+}
+
+.performance-select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ── Supported mice page ─────────────────────────────────── */
+.supported-brands {
+  display: flex;
+  flex-direction: column;
+  margin-top: 1.25rem;
+}
+
+.supported-brand {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 1rem 2rem;
+  align-items: baseline;
+  padding: 0.9rem 0;
+  border: none;
+  border-top: 1px solid var(--line);
+  background: transparent;
+}
+
+.supported-brand-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--bright);
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.supported-model-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.3rem 2rem;
+}
+
+.supported-model {
+  display: flex;
+  flex-direction: column;
+  color: var(--dim);
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
+
+.supported-model-name {
+  color: var(--text);
+}
+
+.supported-model-note {
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 
 .toast-host {
@@ -2278,6 +2478,133 @@ body {
   color: inherit;
   font: inherit;
   width: 100%;
+}
+
+/* ── Theme settings (SettingsPage) ─────────────────────────────────── */
+
+.theme-preset-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.theme-preset-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--control);
+  color: var(--bright);
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.theme-preset-swatch:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.theme-preset-swatch.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--control));
+}
+
+.theme-preset-acc {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: #f5975c;
+  flex-shrink: 0;
+}
+
+[data-theme="emerald"] .theme-preset-acc,
+.theme-preset-swatch[data-theme-preview="emerald"] .theme-preset-acc {
+  background: #58c97c;
+}
+
+[data-theme="violet"] .theme-preset-acc,
+.theme-preset-swatch[data-theme-preview="violet"] .theme-preset-acc {
+  background: #a98bff;
+}
+
+[data-theme="ice"] .theme-preset-acc,
+.theme-preset-swatch[data-theme-preview="ice"] .theme-preset-acc {
+  background: #54b6f5;
+}
+
+[data-theme="mono"] .theme-preset-acc,
+.theme-preset-swatch[data-theme-preview="mono"] .theme-preset-acc {
+  background: #d0d0d3;
+}
+
+[data-theme="light"] .theme-preset-acc,
+.theme-preset-swatch[data-theme-preview="light"] .theme-preset-acc {
+  background: #fbfbf8;
+}
+
+.theme-preset-label {
+  white-space: nowrap;
+}
+
+.theme-custom {
+  margin-top: 0.9rem;
+}
+
+.theme-custom-status {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  margin-left: 0.5rem;
+  color: var(--dim);
+}
+
+.theme-custom-status:empty {
+  display: none;
+}
+
+.theme-custom-editor {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.theme-css-input {
+  width: 100%;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--control);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  tab-size: 2;
+}
+
+.theme-css-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.theme-custom-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.theme-custom-actions > div {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .settings-version{

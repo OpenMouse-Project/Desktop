@@ -15,6 +15,7 @@
 // different device connects or the user explicitly asks for a fresh read.
 
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import {
@@ -35,6 +36,38 @@ import { showToast } from "../lib/toast";
 // manual refresh is still running just silently skips (isHidBusyError)
 // rather than piling up or corrupting anything.
 const AUTO_REFRESH_INTERVAL_MS = 5000;
+
+interface ConflictingApp {
+  process: string;
+  label: string;
+}
+
+// Vendor app (Razer Synapse, LGHUB, …) is running right now — return the
+// conflict message instead of the raw driver error ("device is asleep", the
+// garbled reply, etc.). Quitting the vendor app's process AND its background
+// services typically fixes it, so say that rather than dumping a cryptic
+// string on the connect page.
+async function conflictMessageOr(error: unknown): Promise<string> {
+  try {
+    const apps = await invoke<ConflictingApp[]>("detect_conflicting_apps");
+    if (apps.length > 0) return conflictErrorLabel(apps);
+  } catch {
+    // Fall through — conflict detection itself failing shouldn't suppress
+    // the real connect error.
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+function conflictErrorLabel(apps: ConflictingApp[]): string {
+  const names = [...new Set(apps.map((a) => a.label))];
+  const joined =
+    names.length === 1
+      ? names[0]
+      : names.length === 2
+        ? `${names[0]} and ${names[1]}`
+        : `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+  return `Conflicting software detected — ${joined} ${names.length === 1 ? "is" : "are"} blocking access to your device. Please quit ${names.length === 1 ? "its" : "their"} process and close any background service, then reconnect.`;
+}
 
 export type CandidateListState =
   | { status: "loading" }
@@ -112,7 +145,8 @@ export function useMouseConnection() {
       // rather than showing the user an error for something that isn't one.
       if (isHidBusyError(error)) return;
       if (!opts?.silent) {
-        showToast(error instanceof Error ? error.message : String(error), "error");
+        const message = await conflictMessageOr(error);
+        showToast(message, "error");
       }
     } finally {
       setConnectingKey(null);

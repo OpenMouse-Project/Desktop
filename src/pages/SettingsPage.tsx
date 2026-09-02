@@ -14,6 +14,7 @@ import { showOverlayToast } from "../lib/overlay-toast";
 import { CORNER_LABELS, getOverlaySettings, saveOverlaySettings, type OverlayCorner, type OverlaySettings } from "../lib/overlay-settings";
 import { getVersion } from "@tauri-apps/api/app";
 import type { ResourceMonitorData } from "../hooks/use-resource-monitor";
+import { getThemeState, saveThemeState, THEME_PRESETS, type ThemeState } from "../lib/themes";
 
 
 type AppMode = "bridge" | "full-desktop";
@@ -52,6 +53,8 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const [overlaySettings, setOverlaySettings] = useState<OverlaySettings>(() => getOverlaySettings());
+  const [theme, setTheme] = useState<ThemeState>(() => getThemeState());
+  const [themeEditorOpen, setThemeEditorOpen] = useState(false);
 
   useEffect(() => {
     void getVersion().then(setVersion);
@@ -214,22 +217,86 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
         </label>
       </div>
 
-      <div class="setting-row">
+      <div class="setting-row setting-row-block">
         <div class="setting-label">
           <span class="setting-title">Theme</span>
           <span class="setting-description">
-            Personalize the app's appearance.
+            Pick a preset accent or drop in your own CSS for a fully custom look.
           </span>
         </div>
-        <label class="theme-dropdown">
-          <select>
-            <option>Emerald</option>
-            <option>Violet</option>
-            <option>Ice</option>
-            <option>Emerald</option>
-            <option>Mono</option>
-          </select>
-        </label>
+
+        <div class="theme-preset-picker">
+          {THEME_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              class={`theme-preset-swatch ${theme.presetId === preset.id ? "active" : ""}`}
+              data-theme-preview={preset.id}
+              title={preset.description}
+              aria-label={preset.label}
+              onClick={() => {
+                const next = { ...theme, presetId: preset.id };
+                setTheme(next);
+                saveThemeState(next);
+                showToast(`Theme set to ${preset.label}.`, "success");
+              }}
+            >
+              <span class="theme-preset-acc" aria-hidden="true" />
+              <span class="theme-preset-label">{preset.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div class="theme-custom">
+          <button
+            class="rescan-button"
+            aria-expanded={themeEditorOpen}
+            onClick={() => setThemeEditorOpen((open) => !open)}
+          >
+            {themeEditorOpen ? "Hide custom CSS" : "Custom CSS"}
+            <span class="theme-custom-status">{theme.customCss ? "active" : "off"}</span>
+          </button>
+
+          {themeEditorOpen && (
+            <div class="theme-custom-editor">
+              <textarea
+                class="theme-css-input"
+                rows={8}
+                spellcheck={false}
+                placeholder={"/* Paste custom CSS here. It overrides everything. */\n/* e.g. a new accent: */\n:root {\n  --accent: #ff6b6b;\n}"}
+                value={theme.customCss}
+                onInput={(e) => setTheme({ ...theme, customCss: (e.target as HTMLTextAreaElement).value })}
+              />
+              <div class="theme-custom-actions">
+                <span class="setting-description">
+                  Applies live and is remembered across restarts (both windows).
+                </span>
+                <div>
+                  <button
+                    class="rescan-button"
+                    disabled={theme.customCss.length === 0}
+                    onClick={() => {
+                      const next = { ...theme, customCss: "" };
+                      setTheme(next);
+                      saveThemeState(next);
+                      showToast("Custom CSS cleared.", "info");
+                    }}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    class="connect-button"
+                    onClick={() => {
+                      saveThemeState(theme);
+                      showToast("Custom CSS applied.", "success");
+                    }}
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <hr class="settings-divider" />

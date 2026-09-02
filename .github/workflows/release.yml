@@ -4,9 +4,11 @@ name: Release
 # build-windows.yml, which just sanity-checks that every push to main still
 # compiles. This is the one that actually feeds tauri.conf.json's updater
 # endpoint (github.com/OpenMouse-Project/Desktop/releases/latest/download/latest.json):
-# tauri-action signs the installers with TAURI_SIGNING_PRIVATE_KEY (repo
-# secret; the matching pubkey is what's baked into tauri.conf.json) and
-# generates that latest.json alongside them.
+# tauri-action signs the Windows installers with TAURI_SIGNING_PRIVATE_KEY
+# (repo secret; the matching pubkey is what's baked into tauri.conf.json) and
+# generates that latest.json alongside them. A second job builds the Linux
+# .AppImage on ubuntu-latest so a tag also ships a distro-agnostic Linux
+# build, and a final `publish` job flips the combined draft to a live release.
 #
 # `releases/latest` only ever resolves to the newest NON-prerelease,
 # non-draft release — so this deliberately publishes as a real release
@@ -54,5 +56,90 @@ jobs:
           tagName: v__VERSION__
           releaseName: "OpenMouse Desktop v__VERSION__"
           releaseBody: "See Settings → Changelog in the app for details."
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
+
+  # The Windows job above only produces the .msi/.exe installers. This job
+  # builds the Linux .AppImage so the same `v*.*.*` tag also releases a
+  # distro-agnostic Linux build without anyone needing a local Linux box.
+  # Both jobs run with releaseDraft: true and the same tagName —
+  # tauri-action coalesces them onto one Release: the first leg to finish
+  # creates the (draft) tag/release, the other leg uploads its artifacts to
+  # it. The `publish` job below then flips the combined draft to a live
+  # release once every leg is done. (The updater doesn't support AppImage,
+  # so this job deliberately skips the signing env vars — the AppImage is
+  # just a release asset, not an update channel. The Windows job's signing
+  # env keeps generating latest.json regardless.)
+  linux-appimage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libgtk-3-dev
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "OpenMouse Desktop v__VERSION__"
+          releaseBody: "See Settings → Changelog in the app for details."
+          releaseDraft: true
+          prerelease: false
+
+  # Flipped the combined draft (built by both the Windows and Linux legs) to
+  # a live, non-prerelease release — `releases/latest` only resolves to a
+  # non-draft, non-prerelease release, so this is what lets the Windows
+  # updater (and `releases/latest/download/latest.json`) resolve. Runs once
+  # after every build leg, so the Windows + Linux artifacts all ship on the
+  # same Release. Guarded so a manual `workflow_dispatch` with no matching
+  # tag (which creates no release) doesn't fail the whole run.
+  publish:
+    runs-on: ubuntu-latest
+    needs: [release, linux-appimage]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish the draft release
+        id: publish
+        run: |
+          TAG="v$(node -p \"require('./src-tauri/tauri.conf.json').version\")"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --draft=false
+            echo "published=$TAG"
+          else
+            echo "No release found for $TAG (workflow_dispatch with no tag) — nothing to publish."
+            echo "published="
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

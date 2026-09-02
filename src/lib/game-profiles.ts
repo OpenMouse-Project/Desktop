@@ -21,7 +21,15 @@
 
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
-import { withLogitechClient, type GamingSurfaceMode, type LiftOffDistance } from "../native-hid/logitech-actions";
+import { withLogitechClient } from "../native-hid/logitech-actions";
+import {
+  setDpi,
+  setGamingSurfaceMode,
+  setLiftOffDistance,
+  setPollingRate,
+  type GamingSurfaceMode,
+  type LiftOffDistance,
+} from "../native-hid/write";
 
 const STORAGE_KEY = "openmouse:game-profiles";
 
@@ -118,15 +126,18 @@ export function describeProfile(profile: GameProfile): string {
 }
 
 /**
- * Pushes every setting a profile actually overrides to the connected mouse
- * within a SINGLE open()+resolveDeviceIndex() session (withLogitechClient),
- * not one per field — DevicePerformanceTab's individual controls each pay
- * that cost separately because they're independent user clicks with no
- * reason to share a session, but a profile applying both DPI and polling
- * rate at once has every reason to: paying open/resolve twice back-to-back
- * roughly doubles how long a game launch takes to actually reach the mouse,
- * and doubles the window for colliding with the background status
- * auto-refresh's own hid-open-lock (use-mouse-connection.ts, every 5s).
+ * Pushes every setting a profile actually overrides to the connected mouse.
+ *
+ * Logitech covers WANTS a single shared session: its writes must resolve the
+ * HID++ device index first, and paying open/resolve twice back-to-back for a
+ * profile that sets both DPI and polling rate roughly doubles how long a game
+ * launch takes to actually reach the mouse, plus the collision window with the
+ * background status auto-refresh's own hid-open-lock (use-mouse-connection.ts,
+ * every 5s). So Logitech goes through withLogitechClient once.
+ *
+ * Every other brand has no index to resolve (see write.ts's docs), so each
+ * field is applied with its own short-lived generic open -> act -> close
+ * write — the same cost DevicePerformanceTab's individual controls pay.
  *
  * Applies every field independently rather than stopping at the first
  * failure — a mouse that rejects one setting (e.g. an unsupported polling
@@ -140,41 +151,69 @@ export async function applyGameProfile(
   onApplied: (patch: Partial<MouseStatus>) => void,
 ): Promise<void> {
   const errors: string[] = [];
+  const isLogitech = info.vendorId === 0x046d;
 
-  await withLogitechClient(info, "applyGameProfile", async (client) => {
-    async function run(label: string, action: () => Promise<void>) {
-      try {
-        await action();
-      } catch (error) {
-        errors.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+  async function run(label: string, action: () => Promise<void>) {
+    try {
+      await action();
+    } catch (error) {
+      errors.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
 
+  if (isLogitech) {
+    await withLogitechClient(info, "applyGameProfile", async (client) => {
+      if (profile.dpi !== undefined) {
+        await run("DPI", async () => {
+          const applied = await client.setDpi(profile.dpi!, profile.dpiY);
+          onApplied({ dpi: applied });
+        });
+      }
+      if (profile.pollingRateHz !== undefined) {
+        await run("Polling rate", async () => {
+          const applied = await client.setPollingRate(profile.pollingRateHz!);
+          onApplied({ pollingRateHz: applied });
+        });
+      }
+      if (profile.liftOffDistance !== undefined) {
+        await run("Lift-off distance", async () => {
+          const applied = await client.setLiftOffDistance(profile.liftOffDistance!);
+          onApplied({ liftOffDistance: applied });
+        });
+      }
+      if (profile.gamingSurfaceMode !== undefined) {
+        await run("Gaming surface", async () => {
+          const applied = await client.setGamingSurfaceMode(profile.gamingSurfaceMode!);
+          onApplied({ gamingSurfaceMode: applied });
+        });
+      }
+    });
+  } else {
     if (profile.dpi !== undefined) {
       await run("DPI", async () => {
-        const applied = await client.setDpi(profile.dpi!, profile.dpiY);
+        const applied = await setDpi(info, profile.dpi!, profile.dpiY);
         onApplied({ dpi: applied });
       });
     }
     if (profile.pollingRateHz !== undefined) {
       await run("Polling rate", async () => {
-        const applied = await client.setPollingRate(profile.pollingRateHz!);
+        const applied = await setPollingRate(info, profile.pollingRateHz!);
         onApplied({ pollingRateHz: applied });
       });
     }
     if (profile.liftOffDistance !== undefined) {
       await run("Lift-off distance", async () => {
-        const applied = await client.setLiftOffDistance(profile.liftOffDistance!);
+        const applied = await setLiftOffDistance(info, profile.liftOffDistance!);
         onApplied({ liftOffDistance: applied });
       });
     }
     if (profile.gamingSurfaceMode !== undefined) {
       await run("Gaming surface", async () => {
-        const applied = await client.setGamingSurfaceMode(profile.gamingSurfaceMode!);
+        const applied = await setGamingSurfaceMode(info, profile.gamingSurfaceMode!);
         onApplied({ gamingSurfaceMode: applied });
       });
     }
-  });
+  }
 
   if (errors.length > 0) throw new Error(errors.join("; "));
 }

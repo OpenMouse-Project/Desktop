@@ -4,13 +4,14 @@ import { TitleBar } from "../components/TitleBar";
 import { OverviewPage } from "../pages/OverviewPage";
 import { GamesPage } from "../pages/GamesPage";
 import { SettingsPage } from "../pages/SettingsPage";
+import { SupportedPage } from "../pages/SupportedPage";
 import { ToastHost } from "../components/ToastHost";
 import { useMouseConnection } from "../hooks/use-mouse-connection";
 import { useResourceMonitor } from "../hooks/use-resource-monitor";
 import { useGameWatcher } from "../hooks/use-game-watcher";
 
 type AppMode = "bridge" | "full-desktop";
-type Page = "overview" | "games" | "settings";
+type Page = "overview" | "games" | "supported" | "settings";
 
 interface Props {
   mode: AppMode;
@@ -34,6 +35,8 @@ export function FullDesktopView({ mode, onModeChange }: Props) {
               <OverviewPage connection={connection} activeGameOverride={gameWatcher.activeOverride} />
             ) : page === "games" ? (
               <GamesPage connection={connection} watcher={gameWatcher} />
+            ) : page === "supported" ? (
+              <SupportedPage />
             ) : (
               <SettingsPage mode={mode} onModeChange={onModeChange} resourceMonitor={resourceMonitor} />
             )}

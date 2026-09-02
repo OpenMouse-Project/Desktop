@@ -1,10 +1,10 @@
 import { useState } from "preact/hooks";
-import { LayoutDashboard, Gamepad2, Settings, RefreshCw } from "lucide-preact";
+import { LayoutDashboard, Gamepad2, BookOpen, Settings, RefreshCw } from "lucide-preact";
 import logo from "../assets/logo.png";
 import { runUpdateCheck } from "../lib/update-check";
 import { showToast } from "../lib/toast";
 
-type Page = "overview" | "games" | "settings";
+type Page = "overview" | "games" | "supported" | "settings";
 
 interface Props {
   page: Page;
@@ -14,6 +14,7 @@ interface Props {
 const NAV_ITEMS: { id: Page; icon: typeof LayoutDashboard; label: string }[] = [
   { id: "overview", icon: LayoutDashboard, label: "Overview" },
   { id: "games", icon: Gamepad2, label: "Games" },
+  { id: "supported", icon: BookOpen, label: "Supported mice" },
 ];
 
 export function AppSidebar({ page, onNavigate }: Props) {

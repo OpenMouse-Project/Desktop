@@ -156,7 +156,10 @@ export const BRAND_DRIVERS: BrandEntry[] = [
     client("WallhackMouseHidClient", WallhackMouseHidClient),
     client("WallhackKeyboardHidClient", WallhackKeyboardHidClient),
   ] },
-  { brand: "G-Wolves", vendorIds: [0x3603], candidates: [client("GWolvesHidClient", GWolvesHidClient)] },
+  // Protocol registry uses VID 0x33e4 for GWolves (HTX Ultra 0x5618 wired /
+  // 0x3854 wireless). The earlier 0x3603 never matched anything in the
+  // protocol, so GWolves mice were silently undetected.
+  { brand: "G-Wolves", vendorIds: [0x33e4], candidates: [client("GWolvesHidClient", GWolvesHidClient)] },
 ];
 
 /** Every vendor id any known brand cares about, for a single HID scan. */
