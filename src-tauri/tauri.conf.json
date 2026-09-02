@@ -60,13 +60,13 @@
     "linux": {
       "deb": {
         "files": {
-          "linux/70-openmouse.rules": "/etc/udev/rules.d/70-openmouse.rules"
+          "/etc/udev/rules.d/70-openmouse.rules": "linux/70-openmouse.rules"
         },
         "postInstallScript": "linux/post-install.sh"
       },
       "rpm": {
         "files": {
-          "linux/70-openmouse.rules": "/etc/udev/rules.d/70-openmouse.rules"
+          "/etc/udev/rules.d/70-openmouse.rules": "linux/70-openmouse.rules"
         },
         "postInstallScript": "linux/post-install.sh"
       }
