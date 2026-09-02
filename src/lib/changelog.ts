@@ -21,6 +21,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.18",
+    date: "2026-09-02",
+    changes: [
+      "New: Linux build — OpenMouse Desktop now ships a .AppImage so it runs on any Linux distro, built automatically alongside the Windows installer on every release",
+      "New: full mouse support matching the web app — 80+ models across 20 brands (Logitech, Razer, Endgame Gear, Pulsar, WLMouse, Lamzu, Ninjutso, Finalmouse, Teevolution, and more) with device artwork for each",
+      "New: Supported mice page — a searchable-by-text catalog of every covered model grouped by brand",
+      "New: Advanced settings per brand — Endgame Gear filters & GX switch, Ninjutso sensor & click tuning, Finalmouse dongle LED & tournament scroll, Teevolution DPI lighting, Pulsar Pro wheel & profiles",
+      "New: Buttons tab — remap buttons on Razer and Endgame Gear mice, including scroll/toggle controls and per-button debounce",
+      "New: game profiles now work with every supported brand, not just Logitech",
+      "New: themes — pick a full preset (Emerald, Violet, Ice, Mono, Light) or paste your own custom CSS to restyle the whole app",
+      "New: clearer connect errors — when a vendor app like Razer Synapse is blocking the mouse, the app says to quit it instead of showing a cryptic driver error",
+      "UI: device list and supported-mice catalog now use a full-width document layout instead of centered cards; supported-mice icon updated in the sidebar",
+    ],
+  },
+  {
     version: "0.0.17",
     date: "2026-08-26",
     changes: [
