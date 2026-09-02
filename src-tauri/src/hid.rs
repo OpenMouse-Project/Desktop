@@ -941,16 +941,12 @@ pub async fn hid_get_feature_report(
             buffer[0] = report_id;
             let read = device.get_feature_report(&mut buffer)?;
             // hidapi's get_feature_report puts the report ID at buf[0] and
-            // data at buf[1..].  The return value differs by platform:
-            // - Windows: IOCTL_HID_GET_FEATURE's BytesReturned includes the
-            //   report ID (1 + data_length).
-            // - Linux/macOS: the ioctl returns data_length only.
-            // WebHID's receiveFeatureReport strips the report ID, so we must
-            // strip it here to match the browser API contract.
-            #[cfg(target_os = "windows")]
-            let data_end = read;
-            #[cfg(not(target_os = "windows"))]
-            let data_end = 1 + read;
+            // data at buf[1..].  On all platforms the return value includes
+            // the report-ID byte (Linux ioctl HIDIOCGFEATURE returns total
+            // bytes placed in the buffer; Windows returns the same).
+            // WebHID's receiveFeatureReport strips the report ID, so we
+            // must strip it here to match the browser API contract.
+            let data_end = read.min(buffer.len());
             result = Some(buffer[1..data_end].to_vec());
             Ok(())
         });

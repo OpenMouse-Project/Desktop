@@ -21,6 +21,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.21",
+    date: "2026-09-02",
+    changes: [
+      "Fixed: connecting a mouse on Linux no longer crashes the app — Razer mice (Naga V2 Pro and others) hung on connect and crashed the app partway through; feature-report reads now handle the extra report-ID byte correctly, so supported mice connect and stay connected",
+    ],
+  },
+  {
     version: "0.0.20",
     date: "2026-09-02",
     changes: [
