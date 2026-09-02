@@ -134,6 +134,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - name: Publish the draft release
         # Only meaningful on tag pushes: tauri-action coalesces all build-leg
         # artifacts onto one draft Release for the tag, then we flip it live.
