@@ -21,6 +21,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.19",
+    date: "2026-09-02",
+    changes: [
+      "Fixed: the Linux build now launches — the desktop icon appearing but the app doing nothing when clicked was a startup crash; OpenMouse Desktop opens normally now",
+    ],
+  },
+  {
     version: "0.0.18",
     date: "2026-09-02",
     changes: [

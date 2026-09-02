@@ -217,6 +217,18 @@ pub fn run() {
             // preference, set once at startup: it can never block input to
             // whatever's underneath, a passive HUD that doesn't compete
             // with the game for clicks.
+            //
+            // Linux-only guard: tao's Linux (GTK) backend implements
+            // set_ignore_cursor_events via `input_shape_combine_region` and
+            // unwraps the window's gtk::Window, which is still None at this
+            // point of setup for the transparent undecorated overlay — so
+            // calling it here panics the whole app on launch
+            // ("called Option::unwrap() on a None value" in tao's
+            // event_loop.rs, CursorIgnoreEvents arm). Windows/macOS backends
+            // implement it without that unwrap and are fine. The overlay
+            // starts invisible anyway, so on Linux it just can't be made
+            // click-through this way for now.
+            #[cfg(not(target_os = "linux"))]
             if let Some(overlay) = app.get_webview_window("overlay") {
                 let _ = overlay.set_ignore_cursor_events(true);
             }
