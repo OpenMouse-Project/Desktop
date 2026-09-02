@@ -135,17 +135,19 @@ jobs:
       contents: write
     steps:
       - name: Publish the draft release
-        # This job only matters on tag pushes. On a manual workflow_dispatch
-        # there's no tag and no release to publish, so skip cleanly instead
-        # of failing. The tag name comes straight from the GitHub ref (the
-        # workflow triggers on ^v.* tags) -- no parsing tauri.conf.json.
+        # Only meaningful on tag pushes: tauri-action coalesces all build-leg
+        # artifacts onto one draft Release for the tag, then we flip it live.
+        # Gate on the event type (deterministic) instead of probing the API:
+        # `gh release view` on a draft returned non-zero in CI before, silently
+        # skipping the publish while still exiting green. A manual
+        # workflow_dispatch creates no release and just no-ops here.
         run: |
-          if [ -n "${{ github.ref_name }}" ] && gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
-            gh release edit "${{ github.ref_name }}" --draft=false
-            echo "published=${{ github.ref_name }}"
-          else
-            echo "No release to publish (manual dispatch or missing release)."
-            echo "published="
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Workflow dispatch: no release to publish. Skipping."
+            exit 0
           fi
+          echo "Publishing ${{ github.ref_name }}..."
+          gh release edit "${{ github.ref_name }}" --draft=false
+          echo "published=${{ github.ref_name }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
