@@ -134,16 +134,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
       - name: Publish the draft release
-        id: publish
+        # This job only matters on tag pushes. On a manual workflow_dispatch
+        # there's no tag and no release to publish, so skip cleanly instead
+        # of failing. The tag name comes straight from the GitHub ref (the
+        # workflow triggers on ^v.* tags) -- no parsing tauri.conf.json.
         run: |
-          TAG="v$(node -p \"require('./src-tauri/tauri.conf.json').version\")"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --draft=false
-            echo "published=$TAG"
+          if [ -n "${{ github.ref_name }}" ] && gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+            gh release edit "${{ github.ref_name }}" --draft=false
+            echo "published=${{ github.ref_name }}"
           else
-            echo "No release found for $TAG (workflow_dispatch with no tag) — nothing to publish."
+            echo "No release to publish (manual dispatch or missing release)."
             echo "published="
           fi
         env:
