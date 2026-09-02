@@ -1,0 +1,33 @@
+# OpenMouse Desktop — grant the logged-in user access to supported mice' HID
+# control interfaces.
+#
+# hidapi opens /dev/hidraw* nodes, which are root:root 0660 by default on most
+# distros (Linux Debian/Ubuntu/Zorin included). Without access the app can't
+# open a mouse at all and hangs on "connecting…". This uses the `uaccess` tag,
+# the systemd way to hand the device to the active local session user without
+# a dedicated group — sufficient for a desktop app. Requires a reload for new
+# rules to take effect; the .deb's post-install script runs `udevadm
+# control --reload-rules --reload` and a re-plug (or reboot) applies it.
+#
+# Vendor ids below mirror allKnownVendorIds() in src/native-hid/brands.ts.
+KERNEL=="hidraw*", ATTRS{idVendor}=="0483", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="046d", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1532", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1caa", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1d57", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1915", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="25a7", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="2fe3", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="31e3", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="3151", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="3367", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="33e4", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="3434", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="3554", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="361d", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="36a7", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="3710", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="373b", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="373e", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="3879", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="093a", TAG+="uaccess"

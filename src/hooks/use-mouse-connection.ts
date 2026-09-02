@@ -210,6 +210,27 @@ export function useMouseConnection() {
     void refresh();
   }, [refresh]);
 
+  // On Linux the portable .AppImage has no install step, so the bundled udev
+  // rule (which lets the app open mice' HID interfaces at all) may be
+  // missing — without it every connect would hang on "connecting…". Install
+  // it proactively once at launch. The Rust command is idempotent and
+  // no-ops off-Linux and when the rule is already present (deb/rpm ship it
+  // via their maintainer script), so this is safe to fire unconditionally
+  // every start.
+  useEffect(() => {
+    let cancelled = false;
+    void invoke<string>("install_udev_rules").then((result) => {
+      if (cancelled || result !== "installed") return;
+      showToast(
+        "Enabled mouse access — if you already had a device selected, reconnect it now.",
+        "success",
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Tracks OS-level window focus for the auto-refresh gate below. A plain
   // event subscription, not state — nothing here needs to re-render on
   // focus change, the interval callback just reads the ref when it fires.

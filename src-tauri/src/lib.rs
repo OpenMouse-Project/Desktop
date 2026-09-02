@@ -11,6 +11,7 @@ mod conflicting_apps;
 mod discord_rpc;
 mod games;
 mod hid;
+mod linux_permissions;
 mod resource_monitor;
 use hid::{HidApiHandle, HidRegistry};
 use resource_monitor::ResourceMonitorState;
@@ -149,6 +150,7 @@ pub fn run() {
             games::scan_installed_games,
             conflicting_apps::detect_conflicting_apps,
             resource_monitor::sample_resource_usage,
+            linux_permissions::install_udev_rules,
         ])
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Show OpenMouse", true, None::<&str>)?;

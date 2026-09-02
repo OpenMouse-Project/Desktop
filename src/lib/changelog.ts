@@ -21,6 +21,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.20",
+    date: "2026-09-02",
+    changes: [
+      "Fixed: the Linux build can now actually connect mice — a udev rule granting HID access to supported mice is now installed automatically with the .deb and .rpm packages, and the .AppImage installs it itself on first launch (previously the app couldn't open the device, so connecting any mouse hung on 'connecting…')",
+    ],
+  },
+  {
     version: "0.0.19",
     date: "2026-09-02",
     changes: [
