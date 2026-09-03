@@ -104,6 +104,13 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # INTERACTIVE SSH DEBUGGING STEP
+      # This pauses the cloud machine and prints your custom terminal login connection block.
+      - name: Start Interactive SSH Session
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
