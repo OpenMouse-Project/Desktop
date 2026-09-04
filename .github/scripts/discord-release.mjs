@@ -77,7 +77,6 @@ const colors = {
 };
 const embed = {
   title: `OpenMouse Desktop ${version} · ${stage}`,
-  url: releaseUrl,
   color: colors[stage],
   description: patchNotes,
   fields: [
