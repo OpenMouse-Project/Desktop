@@ -84,6 +84,7 @@ const embed = {
     { name: "Windows", value: "Available", inline: true },
     { name: "Linux", value: "Available", inline: true },
     { name: "macOS", value: "Coming soon", inline: true },
+    { name: "Download", value: `**[⬇️ Get it here](<${releaseUrl}>)** — installer for your platform`, inline: false },
   ],
   footer: { text: `OpenMouse Desktop · ${stage}` },
 };
@@ -91,22 +92,6 @@ const embed = {
 const payload = {
   content: `**New ${stage} version released: ${tag}** 🚀`,
   embeds: [embed],
-  // A "Download" button that opens the release page with every package
-  // (Windows .exe/.msi, Linux .deb/.rpm/.AppImage). It's a Discord link
-  // button (style 5 + url) in an Action Row, so it needs no backend to work.
-  components: [
-    {
-      type: 1, // ACTION_ROW
-      components: [
-        {
-          type: 2, // BUTTON
-          style: 5, // LINK
-          label: "⬇ Download",
-          url: releaseUrl,
-        },
-      ],
-    },
-  ],
 };
 
 for (let attempt = 1; attempt <= 3; attempt++) {
