@@ -24,7 +24,7 @@
 
 import type { MouseLighting, MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import { candidatesForVendorId } from "./brands";
-import type { HidInterfaceInfo } from "./tauri-hid-device";
+import { TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
 import { withHidOpenLock } from "./hid-open-lock";
 
 const OPEN_TIMEOUT_MS = 10000;
@@ -146,7 +146,8 @@ async function withClientLocked<T>(
 ): Promise<T> {
   const attempts: string[] = [];
   for (const candidate of candidatesForVendorId(info.vendorId, info.productId)) {
-    const client = candidate.Client as unknown as WritableClient;
+    const device = new TauriHidDevice(info);
+    const client = new candidate.Client(device) as unknown as WritableClient;
     try {
       await withTimeout(client.open(), OPEN_TIMEOUT_MS, `${candidate.name}.open()`);
       const result = await withTimeout(action(client), ACTION_TIMEOUT_MS, `${candidate.name}.${label}`);
