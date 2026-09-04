@@ -57,23 +57,37 @@ while ((cm = changeRe.exec(entry[3])) !== null) {
 
 const patchNotes = changes.map((line) => `• ${line}`).join("\n") || "No patch notes for this release.";
 
+// Release stage from the version's major number — must stay in lockstep with
+// src/lib/version-stage.ts (0.x Alpha, 1.x Beta, 2.x+ Public).
+function stageForVersion(v) {
+  const major = parseInt(v.replace(/^v/, "").split(".")[0] ?? "0", 10);
+  if (isNaN(major) || major <= 0) return "Alpha";
+  if (major === 1) return "Beta";
+  return "Public";
+}
+const stage = stageForVersion(version);
+
 // ── build the embed ──────────────────────────────────────────────────────
-const colors = { blue: 0x5865f2, white: 0xffffff };
+const colors = {
+  Alpha: 0x5865f2, // blurple
+  Beta: 0xf1c40f, // yellow
+  Public: 0x2ecc71, // green
+};
 const embed = {
-  title: `OpenMouse Desktop ${version}`,
+  title: `OpenMouse Desktop ${version} · ${stage}`,
   url: `https://github.com/${repo}/releases/tag/${tag}`,
-  color: colors.blue,
+  color: colors[stage],
   description: patchNotes,
   fields: [
     { name: "Windows", value: "Available", inline: true },
     { name: "Linux", value: "Available", inline: true },
     { name: "macOS", value: "Coming soon", inline: true },
   ],
-  footer: { text: "OpenMouse Desktop" },
+  footer: { text: `OpenMouse Desktop · ${stage}` },
 };
 
 const payload = {
-  content: `**New version released: ${tag}** 🚀`,
+  content: `**New ${stage} version released: ${tag}** 🚀`,
   embeds: [embed],
 };
 

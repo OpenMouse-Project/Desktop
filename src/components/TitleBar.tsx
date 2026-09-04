@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import { Minus, Square, X } from "lucide-preact";
 import { subscribeUpdateCheck } from "../lib/update-check";
+import { stageForVersion } from "../lib/version-stage";
 
 const win = getCurrentWindow();
 
@@ -33,7 +34,7 @@ export function TitleBar({ showMaximize = true }: Props) {
             class={`titlebar-badge ${updateAvailable ? "titlebar-badge-update" : ""}`}
             title={updateAvailable ? "An update is available — see Settings" : undefined}
           >
-            v{version} · Alpha
+            v{version} · {stageForVersion(version)}
           </span>
         )}
       </div>
