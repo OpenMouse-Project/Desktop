@@ -152,3 +152,20 @@ jobs:
           echo "published=${{ github.ref_name }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Posts the release to Discord (version + full patch notes + platforms)
+  # once the draft is live. Only meaningful on tag pushes — a manual
+  # workflow_dispatch creates no release, so it's gated out up front. The
+  # webhook URL (which embeds a secret token) is never committed; it lives in
+  # the DISCORD_WEBHOOK_URL repo secret and is read by
+  # .github/scripts/discord-release.mjs.
+  discord-notify:
+    runs-on: ubuntu-latest
+    needs: [publish]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Notify Discord of the release
+        run: node .github/scripts/discord-release.mjs "${{ github.ref_name }}" "${{ github.repository }}"
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
