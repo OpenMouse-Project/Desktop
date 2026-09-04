@@ -21,10 +21,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: "0.0.22",
+    version: "0.0.23",
     date: "2026-09-04",
     changes: [
       "Fixed: applying DPI or any other setting on driver-backed (non-Logitech, non-Razer) mice failed with an \"o.close is not a function\" error — the generic write path called methods on the driver class itself instead of an instance, so writes never reached the device",
+      "Changed: the titlebar now shows the build's release stage (Alpha / Beta / Public) next to the version, based on the version number",
     ],
   },
   {

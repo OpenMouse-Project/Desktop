@@ -1,7 +1,7 @@
 // Posts a release notification to Discord when a new version ships.
 //
 // Run from a GitHub Actions job that has already checked out the repo. Reads:
-//   - the release tag (github.ref_name, e.g. "v0.0.22") from argv[2]
+//   - the release tag (github.ref_name, e.g. "v0.0.23") from argv[2]
 //   - the repo slug (github.repository) from argv[3]
 //   - the Discord webhook URL from DISCORD_WEBHOOK_URL
 //
