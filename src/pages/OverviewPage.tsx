@@ -67,6 +67,11 @@ const BRAND_FEATURES: Record<string, { icon: typeof Gauge; label: string }[]> = 
     { icon: Gauge, label: "DPI" },
     { icon: Zap, label: "Polling Rate" },
   ],
+  Lingbao: [
+    { icon: Gauge, label: "DPI" },
+    { icon: Zap, label: "Polling Rate" },
+    { icon: Battery, label: "Battery" },
+  ],
   Keychron: [
     { icon: Gauge, label: "DPI" },
     { icon: Zap, label: "Polling Rate" },
