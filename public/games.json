@@ -78,6 +78,12 @@
       "name": "The Finals",
       "steamAppId": "2073850",
       "executables": ["Discovery.exe", "Discovery-d.exe", "discovery-e.exe"]
+    },
+    {
+      "id": "risk-of-rain-two",
+      "name": "Risk of Rain 2",
+      "steamAppId": "632360",
+      "executables": ["Risk Of Rain 2.exe"]
     }
   ]
 }
