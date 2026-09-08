@@ -144,6 +144,10 @@ export const SUPPORTED_BRANDS: SupportedBrand[] = [
     models: [{ model: "WG14P Yari Pro Wireless 8K Gaming Mouse" }],
   },
   {
+    brand: "Lingbao",
+    models: [{ model: "M5 Pro (2.4G / wired)" }],
+  },
+  {
     brand: "G-Wolves",
     models: [{ model: "HTX Ultra (wired)" }, { model: "HTX Ultra (wireless)" }],
   },

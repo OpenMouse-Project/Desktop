@@ -22,6 +22,7 @@ import { AttackSharkHidClient } from "@openmouse/protocol/drivers/attackshark/hi
 import { EggOp1HidClient } from "@openmouse/protocol/drivers/endgame/egg-op1-hid";
 import { EggWeHidClient } from "@openmouse/protocol/drivers/endgame/egg-we-hid";
 import { FantechHidClient } from "@openmouse/protocol/drivers/fantech/hid";
+import { LingbaoHidClient } from "@openmouse/protocol/drivers/lingbao/hid";
 import { FinalmouseHidClient } from "@openmouse/protocol/drivers/finalmouse/hid";
 import { GWolvesHidClient } from "@openmouse/protocol/drivers/gwolves/hid";
 import { KeychronHidClient } from "@openmouse/protocol/drivers/keychron/hid";
@@ -150,7 +151,14 @@ export const BRAND_DRIVERS: BrandEntry[] = [
   { brand: "ATK", vendorIds: [0x373b], candidates: [client("AtkHidClient", AtkHidClient)] },
   { brand: "Attack Shark", vendorIds: [0x1d57, 0x25a7, 0x373e], candidates: [client("AttackSharkHidClient", AttackSharkHidClient)] },
   { brand: "Keychron", vendorIds: [0x3434], candidates: [client("KeychronHidClient", KeychronHidClient)] },
-  { brand: "Fantech", vendorIds: [0x3151], candidates: [client("FantechHidClient", FantechHidClient)] },
+  // 0x3151 is the MicLink/mlzn ODM vendor id, shared by Lingbao and Fantech.
+  // Lingbao goes first: its M5 Pro needs a 2.4G relay handshake and a checksum
+  // FantechHidClient does not implement, and probeInterface() falls through to
+  // Fantech when LingbaoHidClient.readStatus() rejects.
+  { brand: "Lingbao", vendorIds: [0x3151], candidates: [
+    client("LingbaoHidClient", LingbaoHidClient),
+    client("FantechHidClient", FantechHidClient),
+  ] },
   { brand: "Wooting", vendorIds: [0x31e3], candidates: [client("WootingHidClient", WootingHidClient)] },
   { brand: "WALLHACK", vendorIds: [0x3879, 0x1caa], candidates: [
     client("WallhackMouseHidClient", WallhackMouseHidClient),
