@@ -21,6 +21,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.26",
+    date: "2026-09-08",
+    changes: [
+      "The Games list is now fetched live instead of bundled with the app — new games can be added without an update. This release is what turns that on; no action needed beyond installing it.",
+    ],
+  },
+  {
     version: "0.0.25",
     date: "2026-09-08",
     changes: [
