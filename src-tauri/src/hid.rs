@@ -499,12 +499,26 @@ pub fn hid_open(
         // below, so Windows genuinely needs it mutable even though macOS
         // can't see why.
         #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
-        let mut paths: Vec<String> = api
+        let mut infos: Vec<_> = api
             .device_list()
             .filter(|info| {
                 info.vendor_id() == vendor_id
                     && info.product_id() == product_id
             })
+            .collect();
+        // Prioritize Vendor-Specific collections (>= 0xFF00) and Consumer Control (0x000C).
+        // On Linux, hidapi can open the standard mouse pointer collection (0x0001),
+        // which often acts as a black hole: it successfully accepts feature reports
+        // but drops them or returns zeroes. By trying vendor collections first,
+        // `try_each` routes the configuration protocol to the correct interface.
+        infos.sort_by_key(|info| match info.usage_page() {
+            p if p >= 0xFF00 => 0,
+            0x000C => 1,
+            _ => 2,
+        });
+        #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
+        let mut paths: Vec<String> = infos
+            .into_iter()
             .map(|info| {
                 let p = info.path().to_string_lossy().into_owned();
                 applog!(
@@ -515,6 +529,7 @@ pub fn hid_open(
                 p
             })
             .collect();
+
 
         // On Windows, merge in any extra sub-collection paths that
         // hidapi missed but SetupDi enumerated.
