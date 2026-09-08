@@ -84,6 +84,12 @@
       "name": "Risk of Rain 2",
       "steamAppId": "632360",
       "executables": ["Risk Of Rain 2.exe"]
+    },
+    {
+      "id": "destiny-2",
+      "name": "Destiny 2",
+      "steamAppId": "1085660",
+      "executables": ["Destiny2.exe"]
     }
   ]
 }
