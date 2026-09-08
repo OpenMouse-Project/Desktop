@@ -78,7 +78,13 @@ function logLine(line: string) {
 
 async function fetchGamesFile(): Promise<GamesFile> {
   try {
-    const response = await fetch(REMOTE_GAMES_URL);
+    // `cache: "no-store"` bypasses WebView2/WebKit's own local HTTP cache,
+    // which otherwise honors the CDN's Cache-Control max-age and keeps
+    // serving whatever it first fetched for up to a week — independent of,
+    // and surviving past, any jsDelivr edge purge. This is the one request
+    // per launch this hook makes; the CDN's own edge caching still does the
+    // real work of not hammering the origin repo.
+    const response = await fetch(REMOTE_GAMES_URL, { cache: "no-store" });
     if (!response.ok) throw new Error(`Could not load games (${response.status})`);
     const data = (await response.json()) as GamesFile;
     logLine(`loaded ${data.games.length} games from remote CDN (${REMOTE_GAMES_URL})`);

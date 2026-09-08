@@ -21,6 +21,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.28",
+    date: "2026-09-08",
+    changes: [
+      "Fixed: the Games list could get stuck on an outdated snapshot for up to a week — the app's own local HTTP cache was holding onto the first copy it ever fetched even after the source was updated. It now always fetches the current list.",
+    ],
+  },
+  {
     version: "0.0.27",
     date: "2026-09-08",
     changes: [
