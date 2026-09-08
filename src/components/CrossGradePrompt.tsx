@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 import { TitleBar } from "./TitleBar";
-import { requestDesktopInstall } from "../lib/cross-grade";
+import { requestVariant } from "../lib/cross-grade";
 
 interface Props {
   /** Flips the persisted mode back to "bridge" so this build has something to render. */
@@ -10,8 +10,11 @@ interface Props {
 /**
  * Shown by App.bridge.tsx when the persisted app mode is "full-desktop"
  * but this install is the bridge-only build, which never bundles
- * FullDesktopView. See lib/cross-grade.ts for why this sends the user to
- * the release page rather than installing Desktop on its own.
+ * FullDesktopView. requestVariant (lib/cross-grade.ts) either launches an
+ * already-installed Desktop build or downloads+launches its installer —
+ * either way this process exits on success, so `opening` only matters for
+ * the failure case (offline, no matching release asset), where it falls
+ * back to just opening the releases page and control returns here.
  */
 export function CrossGradePrompt({ onStayInBridge }: Props) {
   const [opening, setOpening] = useState(false);
@@ -19,7 +22,7 @@ export function CrossGradePrompt({ onStayInBridge }: Props) {
   async function handleGetDesktop() {
     setOpening(true);
     try {
-      await requestDesktopInstall();
+      await requestVariant("full-desktop");
     } finally {
       setOpening(false);
     }

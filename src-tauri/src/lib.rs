@@ -8,6 +8,7 @@ use tauri::{AppHandle, LogicalSize, Manager, Size, State, WebviewWindow, WindowE
 #[macro_use]
 mod applog;
 mod conflicting_apps;
+mod cross_grade;
 mod discord_rpc;
 mod games;
 mod hid;
@@ -151,6 +152,11 @@ pub fn run() {
             conflicting_apps::detect_conflicting_apps,
             resource_monitor::sample_resource_usage,
             linux_permissions::install_udev_rules,
+            cross_grade::register_variant,
+            cross_grade::get_installed_variants,
+            cross_grade::switch_to_installed_variant,
+            cross_grade::find_installer_asset,
+            cross_grade::download_and_launch_installer,
         ])
         .setup(|app| {
             let show = MenuItem::with_id(app, "show", "Show OpenMouse", true, None::<&str>)?;

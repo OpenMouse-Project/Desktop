@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import { BridgeView } from "./layouts/BridgeView";
 import { CrossGradePrompt } from "./components/CrossGradePrompt";
+import { registerVariant, requestVariant } from "./lib/cross-grade";
 
 type AppMode = "bridge" | "full-desktop";
 const DISCORD_RPC_PREFERENCE = "openmouse.discord-rpc.enabled";
@@ -28,6 +29,7 @@ function App() {
 
   useEffect(() => {
     invoke<AppMode>("get_mode").then(setModeState);
+    registerVariant("bridge");
     if (localStorage.getItem(DISCORD_RPC_PREFERENCE) === "true") {
       void invoke("enable");
     }
@@ -35,10 +37,15 @@ function App() {
 
   async function switchMode(next: AppMode) {
     if (next === "full-desktop") {
-      // Don't tell the Rust side we're in full-desktop mode when this
-      // build can't render it — leave the persisted mode alone so a
-      // relaunch (e.g. after actually installing Desktop) isn't left in a
-      // state this build can't show.
+      // This build never bundles FullDesktopView, so there's nothing to
+      // switch to locally. requestVariant either launches an
+      // already-installed Desktop build and exits this process, or
+      // downloads+launches its installer and exits — either way control
+      // doesn't return here on success. Don't touch the persisted mode:
+      // if it fails (offline, no matching release asset), this build
+      // should still come back up as Bridge next launch, not get stuck
+      // showing CrossGradePrompt with no installed Desktop to switch to.
+      await requestVariant("full-desktop");
       return;
     }
     const confirmed = await invoke<AppMode>("set_mode", { mode: next });
