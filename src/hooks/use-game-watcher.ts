@@ -57,6 +57,30 @@ export type GamesListState =
 // background poll (use-mouse-connection.ts's device auto-refresh) in spirit.
 const POLL_INTERVAL_MS = 4000;
 
+// Hosted straight out of this (public) repo via jsDelivr's GitHub CDN, so
+// adding/editing a game is just a commit+push to games.json — no app
+// rebuild or release. jsDelivr fronts raw.githubusercontent.com with real
+// caching (~12-24h TTL, purgeable), unlike raw GitHub's tight unauthenticated
+// rate limits. Falls back to the bundled /games.json (shipped in public/,
+// same file) if the network's unavailable or the CDN is unreachable, so the
+// Games page still works offline / on first run before any fetch succeeds.
+const REMOTE_GAMES_URL = "https://cdn.jsdelivr.net/gh/OpenMouse-Project/Desktop@main/public/games.json";
+const LOCAL_GAMES_URL = "/games.json";
+
+async function fetchGamesFile(): Promise<GamesFile> {
+  try {
+    const response = await fetch(REMOTE_GAMES_URL);
+    if (!response.ok) throw new Error(`Could not load games (${response.status})`);
+    return (await response.json()) as GamesFile;
+  } catch {
+    // Remote fetch failed (offline, DNS, CDN hiccup) — fall back to the
+    // copy bundled with the app itself.
+    const response = await fetch(LOCAL_GAMES_URL);
+    if (!response.ok) throw new Error(`Could not load games (${response.status})`);
+    return (await response.json()) as GamesFile;
+  }
+}
+
 /**
  * Whichever game currently "owns" the mouse's live settings — i.e. the most
  * recent game to auto-apply a profile that hasn't closed yet — along with
@@ -107,13 +131,8 @@ export function useGameWatcher(connection: MouseConnection) {
   const activeOverrideRef = useRef<ActiveOverride | null>(null);
 
   useEffect(() => {
-    fetch("/games.json")
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Could not load games (${response.status})`);
-        }
-        const data = (await response.json()) as GamesFile;
-
+    fetchGamesFile()
+      .then(async (data) => {
         // Collect each launcher's known IDs from the games list
         const knownSteamIds = data.games
           .filter((g) => g.steamAppId)
