@@ -2164,6 +2164,35 @@ body {
   margin-bottom: 0.9rem;
 }
 
+/* Shown by the bridge-only build in place of FullDesktopView when the
+   persisted mode is "full-desktop" — see components/CrossGradePrompt.tsx. */
+.cross-grade-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0.9rem;
+}
+
+.cross-grade-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cross-grade-body {
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.cross-grade-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
 
 .bridge-settings-button {
   margin-left: auto;

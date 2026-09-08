@@ -1,6 +1,12 @@
 import { render } from "preact";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import App from "./App";
+// Resolved by vite.config.ts's alias to either App.tsx (desktop build,
+// default) or App.bridge.tsx (bridge build, `vite build --mode bridge`) —
+// see that file for why this is a build-time file swap rather than a
+// runtime branch: it's what actually keeps FullDesktopView and everything
+// under it (device tabs, device images, game-profile code) out of the
+// bridge installer instead of just hiding it behind a flag at runtime.
+import App from "~app-entry";
 import { OverlayApp } from "./OverlayApp";
 import { initTheme } from "./lib/themes";
 import "./App.css";

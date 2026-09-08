@@ -15,6 +15,15 @@
     "jsx": "react-jsx",
     "jsxImportSource": "preact",
 
+    /* Matches vite.config.ts's "~app-entry" alias (main.tsx) so `tsc`
+       resolves it too. Points at App.tsx (the desktop entry) since that's
+       what plain `tsc` / `npm run build` uses; App.bridge.tsx is still
+       typechecked on its own because it's under src/ regardless. */
+    "baseUrl": ".",
+    "paths": {
+      "~app-entry": ["./src/App.tsx"]
+    },
+
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,

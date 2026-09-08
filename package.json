@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:bridge": "tsc && vite build --mode bridge",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:bridge": "tauri build --config src-tauri/tauri.bridge.conf.json"
   },
   "dependencies": {
     "@openmouse/protocol": "https://github.com/OpenMouse-Project/mouse-protocol.git",
