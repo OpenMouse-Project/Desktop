@@ -2193,6 +2193,126 @@ body {
   margin-top: 0.4rem;
 }
 
+/* Shown on first launch of either build, before a mode has ever been
+   chosen — see components/WelcomeChooser.tsx. Fills the window and
+   vertically centers its content (rather than top-aligning with dead
+   space below, which is what a plain flex column does when the window's
+   taller than the content) so it reads as one composed screen instead of
+   a form stuck at the top of an oversized box. */
+.welcome-chooser-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: var(--ink);
+  overflow: auto;
+  border-radius: 10px;
+}
+
+.welcome-chooser {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1rem;
+  margin: 0 1rem 1rem;
+  min-height: 0;
+}
+
+.welcome-chooser-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.welcome-chooser-title {
+  margin: 0;
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text);
+  text-align: center;
+}
+
+.welcome-chooser-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.welcome-chooser-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  text-align: left;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+
+.welcome-chooser-option:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--raised);
+  transform: translateY(-1px);
+}
+
+.welcome-chooser-option:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.welcome-chooser-option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.welcome-chooser-option-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--raised);
+  color: var(--accent);
+}
+
+.welcome-chooser-option-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.welcome-chooser-option-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.welcome-chooser-option-body {
+  color: var(--dim);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.welcome-chooser-option-arrow {
+  flex-shrink: 0;
+  margin-top: 0.2rem;
+  color: var(--faint);
+}
+
+.welcome-chooser-disclaimer {
+  margin: 0;
+  color: var(--faint);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
 
 .bridge-settings-button {
   margin-left: auto;

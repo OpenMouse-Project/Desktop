@@ -39,7 +39,51 @@ const BRIDGE_WINDOW_SIZE: (f64, f64) = (320.0, 420.0);
 /// should occupy.
 const FULL_DESKTOP_SCREEN_FRACTION: f64 = 0.75;
 
-struct ModeState(Mutex<AppMode>);
+struct ModeState(Mutex<Option<AppMode>>);
+
+/// Where the chosen mode is persisted — in this build's own (identifier-
+/// scoped) app-data dir, deliberately NOT the shared one cross_grade.rs
+/// uses for the installed-variants manifest: Bridge and Desktop are
+/// separate installs with their own identifiers, and each should remember
+/// its own last-chosen mode independently.
+fn mode_prefs_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_data_dir().ok().map(|dir| dir.join("mode.json"))
+}
+
+/// `None` here — on disk or in ModeState — means "never chosen yet", which
+/// is what tells the frontend to show WelcomeChooser instead of a mode's
+/// normal view. This used to default straight to AppMode::FullDesktop with
+/// nothing written to disk (CONFIRMED bug: every launch, of either build,
+/// reset back to Full Desktop instead of remembering the last choice —
+/// harmless for the Desktop build, since it bundles both UIs, but meant
+/// the Bridge build re-showed CrossGradePrompt on every single launch
+/// instead of just the first).
+fn load_persisted_mode(app: &AppHandle) -> Option<AppMode> {
+    let path = mode_prefs_path(app)?;
+    let contents = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&contents).ok()
+}
+
+fn save_persisted_mode(app: &AppHandle, mode: AppMode) {
+    let Some(path) = mode_prefs_path(app) else {
+        applog!("[mode] couldn't resolve app data dir, mode won't be remembered");
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            applog!("[mode] couldn't create app data dir: {e}");
+            return;
+        }
+    }
+    match serde_json::to_string(&mode) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                applog!("[mode] couldn't persist mode: {e}");
+            }
+        }
+        Err(e) => applog!("[mode] couldn't serialize mode: {e}"),
+    }
+}
 
 fn resize_for_mode(window: &WebviewWindow, mode: AppMode) {
     match mode {
@@ -63,14 +107,18 @@ fn resize_for_mode(window: &WebviewWindow, mode: AppMode) {
     let _ = window.center();
 }
 
+/// `None` = never chosen yet (fresh install, or the prefs file couldn't be
+/// read) — the frontend renders WelcomeChooser in that case instead of
+/// either mode's normal view.
 #[tauri::command]
-fn get_mode(state: State<ModeState>) -> AppMode {
+fn get_mode(state: State<ModeState>) -> Option<AppMode> {
     *state.0.lock().unwrap()
 }
 
 #[tauri::command]
-fn set_mode(mode: AppMode, window: WebviewWindow, state: State<ModeState>) -> AppMode {
-    *state.0.lock().unwrap() = mode;
+fn set_mode(mode: AppMode, window: WebviewWindow, state: State<ModeState>, app: AppHandle) -> AppMode {
+    *state.0.lock().unwrap() = Some(mode);
+    save_persisted_mode(&app, mode);
     resize_for_mode(&window, mode);
     mode
 }
@@ -97,9 +145,11 @@ fn show_main_window(app: &AppHandle) {
                     // Recreating from the static config alone gives back
                     // its on-disk default size, not whatever mode the app
                     // was actually in — reapply that the same way the
-                    // initial launch does (see `setup` below).
-                    let mode = *app.state::<ModeState>().0.lock().unwrap();
-                    resize_for_mode(&window, mode);
+                    // initial launch does (see `setup` below). No-op if a
+                    // mode was never chosen (WelcomeChooser still showing).
+                    if let Some(mode) = *app.state::<ModeState>().0.lock().unwrap() {
+                        resize_for_mode(&window, mode);
+                    }
                     window
                 }
                 Err(e) => {
@@ -127,7 +177,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(ModeState(Mutex::new(AppMode::FullDesktop)))
+        .manage(ModeState(Mutex::new(None)))
         .manage(discord_rpc::DiscordRpcState::default())
         .manage(HidRegistry::default())
         .manage(HidApiHandle::default())
@@ -207,11 +257,15 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Size the window to match the initial mode (Full Desktop by
-            // default — see ModeState above).
-            if let Some(window) = app.get_webview_window("main") {
-                let state = app.state::<ModeState>();
-                let mode = *state.0.lock().unwrap();
+            // Load whatever mode was last chosen (see save_persisted_mode /
+            // load_persisted_mode) — None means this is a fresh install
+            // that's never had a mode chosen yet, in which case the
+            // frontend shows WelcomeChooser and there's nothing to resize
+            // for until that picks one (via set_mode, which persists and
+            // resizes itself).
+            let mode = load_persisted_mode(app.handle());
+            *app.state::<ModeState>().0.lock().unwrap() = mode;
+            if let (Some(window), Some(mode)) = (app.get_webview_window("main"), mode) {
                 resize_for_mode(&window, mode);
             }
 
@@ -244,13 +298,15 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // In Bridge Mode, closing the window hides it to the tray instead
-            // of quitting — the companion process keeps running. In Full
-            // Desktop Mode, closing behaves like a normal app quit.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let state = window.state::<ModeState>();
-                let mode = *state.0.lock().unwrap();
-                if mode == AppMode::Bridge {
+            // Closing the main window always hides it to the tray instead
+            // of quitting, in both modes — the app (and its tray icon)
+            // keeps running either way, same as it always did in Bridge
+            // Mode. "Quit" from the tray menu is the actual exit. Guarded
+            // to the main window specifically so this doesn't interfere
+            // with the overlay window's own show/hide, which it manages
+            // itself (see OverlayApp.tsx).
+            if window.label() == "main" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = window.hide();
                 }

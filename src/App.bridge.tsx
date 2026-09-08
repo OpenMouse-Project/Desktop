@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import { BridgeView } from "./layouts/BridgeView";
 import { CrossGradePrompt } from "./components/CrossGradePrompt";
+import { WelcomeChooser } from "./components/WelcomeChooser";
 import { registerVariant, requestVariant } from "./lib/cross-grade";
 
 type AppMode = "bridge" | "full-desktop";
@@ -16,19 +17,20 @@ const DISCORD_RPC_PREFERENCE = "openmouse.discord-rpc.enabled";
  * entirely, so the Bridge installer doesn't ship megabytes of UI a
  * bridge-only user never opens.
  *
- * `mode` still comes from the same Rust-side ModeState as the full-desktop
- * build (it's the same persisted preference), so if this install's mode
- * was ever flipped to "full-desktop" — most likely by a Desktop install
- * sharing the same app-data preference, or a leftover from before the
- * user switched to the bridge-only download — we can't render
- * FullDesktopView locally. CrossGradePrompt offers to fetch the real
- * Desktop build instead of silently doing nothing.
+ * `mode` is persisted per-install now (lib.rs's mode.json lives in this
+ * build's own, identifier-scoped app-data dir — separate from Desktop's),
+ * so this build's own switchMode is the only thing that could ever set it
+ * to "full-desktop" here, and it deliberately never does (see below) —
+ * CrossGradePrompt below is a defensive fallback for that state, not a
+ * path this code normally takes.
  */
 function App() {
-  const [mode, setModeState] = useState<AppMode | null>(null);
+  // undefined = get_mode hasn't answered yet. null = it answered with "no
+  // mode chosen yet" (first launch) — show WelcomeChooser.
+  const [mode, setModeState] = useState<AppMode | null | undefined>(undefined);
 
   useEffect(() => {
-    invoke<AppMode>("get_mode").then(setModeState);
+    invoke<AppMode | null>("get_mode").then(setModeState);
     registerVariant("bridge");
     if (localStorage.getItem(DISCORD_RPC_PREFERENCE) === "true") {
       void invoke("enable");
@@ -43,8 +45,9 @@ function App() {
       // downloads+launches its installer and exits — either way control
       // doesn't return here on success. Don't touch the persisted mode:
       // if it fails (offline, no matching release asset), this build
-      // should still come back up as Bridge next launch, not get stuck
-      // showing CrossGradePrompt with no installed Desktop to switch to.
+      // should still come back up as Bridge (or WelcomeChooser, on a
+      // fresh install) next launch, not get stuck showing CrossGradePrompt
+      // with no installed Desktop to switch to.
       await requestVariant("full-desktop");
       return;
     }
@@ -52,8 +55,12 @@ function App() {
     setModeState(confirmed);
   }
 
-  if (mode === null) {
+  if (mode === undefined) {
     return null;
+  }
+
+  if (mode === null) {
+    return <WelcomeChooser onChooseBridge={() => switchMode("bridge")} onChooseFullDesktop={() => switchMode("full-desktop")} />;
   }
 
   return mode === "full-desktop" ? (
