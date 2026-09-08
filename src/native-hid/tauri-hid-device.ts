@@ -129,6 +129,25 @@ export class TauriHidDevice implements HIDDevice {
     return new DataView(Uint8Array.from(bytes).buffer);
   }
 
+  async receiveInputReport(reportId: number): Promise<DataView> {
+    const isWindows = navigator.userAgent.includes("Win") || navigator.platform.includes("Win");
+    if (!isWindows) {
+      // The Intellimouse firmware is quirky: it responds to GET_REPORT(Feature) 
+      // but not GET_REPORT(Input) over the control pipe.
+      // On Windows, get_input_report works because Windows caches the interrupt response.
+      // On Linux/macOS, get_input_report sends a real GET_REPORT(Input) and returns all 0s.
+      // Fortunately, Linux/macOS don't block get_feature_report, so we just use that.
+      return this.receiveFeatureReport(reportId);
+    }
+    const bytes = await invoke<number[]>("hid_get_input_report", {
+      vendorId: this.vendorId,
+      productId: this.productId,
+      reportId,
+      length: 90,
+    });
+    return new DataView(Uint8Array.from(bytes).buffer);
+  }
+
   addEventListener(type: "inputreport", listener: (event: HIDInputReportEvent) => void): void {
     if (type !== "inputreport") return;
     this.listeners.add(listener);

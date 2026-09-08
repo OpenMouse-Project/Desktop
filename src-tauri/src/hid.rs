@@ -926,6 +926,30 @@ pub async fn hid_send_feature_report(
 }
 
 #[tauri::command]
+pub async fn hid_get_input_report(
+    registry: tauri::State<'_, HidRegistry>,
+    vendor_id: u16,
+    product_id: u16,
+    report_id: u8,
+    length: usize,
+) -> Result<Vec<u8>, String> {
+    applog!("[hid] hid_get_input_report {vendor_id:04x}:{product_id:04x} reportId=0x{report_id:02x} length={length}");
+    let result = with_open_group(&registry, vendor_id, product_id, |splits, routes| {
+        let mut result: Option<Vec<u8>> = None;
+        let outcome = try_each(splits, routes, report_id, |device| {
+            let mut buffer = vec![0u8; length + 1];
+            buffer[0] = report_id;
+            let read = device.get_input_report(&mut buffer)?;
+            let data_end = read.min(buffer.len());
+            result = Some(buffer[1..data_end].to_vec());
+            Ok(())
+        });
+        outcome.and(result.ok_or_else(|| "no split returned data".to_string()))
+    });
+    applog!("[hid] hid_get_input_report done: {result:?}");
+    result
+}
+#[tauri::command]
 pub async fn hid_get_feature_report(
     registry: tauri::State<'_, HidRegistry>,
     vendor_id: u16,
