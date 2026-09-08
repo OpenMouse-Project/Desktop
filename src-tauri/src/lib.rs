@@ -97,6 +97,7 @@ pub fn run() {
             discord_rpc::update_activity,
             applog::get_logs,
             applog::export_logs,
+            applog::log_line,
             games::running_process_names,
             games::scan_installed_games,
             conflicting_apps::detect_conflicting_apps,

@@ -21,6 +21,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.27",
+    date: "2026-09-08",
+    changes: [
+      "Diagnostics: whether the Games list loads from the live feed or the app's own built-in copy is now recorded in Settings → Download Logs, so a missing/outdated game is easier to track down",
+    ],
+  },
+  {
     version: "0.0.26",
     date: "2026-09-08",
     changes: [

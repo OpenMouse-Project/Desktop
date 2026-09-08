@@ -67,17 +67,32 @@ const POLL_INTERVAL_MS = 4000;
 const REMOTE_GAMES_URL = "https://cdn.jsdelivr.net/gh/OpenMouse-Project/Desktop@main/public/games.json";
 const LOCAL_GAMES_URL = "/games.json";
 
+// Best-effort — recorded into the same ring buffer Settings' "Download
+// Logs" button exports, so a report of "my new game isn't showing up" is
+// diagnosable (remote fetch failed vs. served stale-but-successful vs.
+// fell back to the bundled copy) without needing DevTools on a production
+// build.
+function logLine(line: string) {
+  void invoke("log_line", { line: `[games] ${line}` }).catch(() => {});
+}
+
 async function fetchGamesFile(): Promise<GamesFile> {
   try {
     const response = await fetch(REMOTE_GAMES_URL);
     if (!response.ok) throw new Error(`Could not load games (${response.status})`);
-    return (await response.json()) as GamesFile;
-  } catch {
+    const data = (await response.json()) as GamesFile;
+    logLine(`loaded ${data.games.length} games from remote CDN (${REMOTE_GAMES_URL})`);
+    return data;
+  } catch (error) {
     // Remote fetch failed (offline, DNS, CDN hiccup) — fall back to the
     // copy bundled with the app itself.
+    const message = error instanceof Error ? error.message : String(error);
+    logLine(`remote fetch failed (${message}), falling back to bundled ${LOCAL_GAMES_URL}`);
     const response = await fetch(LOCAL_GAMES_URL);
     if (!response.ok) throw new Error(`Could not load games (${response.status})`);
-    return (await response.json()) as GamesFile;
+    const data = (await response.json()) as GamesFile;
+    logLine(`loaded ${data.games.length} games from bundled local copy`);
+    return data;
   }
 }
 
