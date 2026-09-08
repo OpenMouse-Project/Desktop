@@ -1,12 +1,8 @@
 // Module-level "is an update available" store, plus the background poll
 // that drives it — same pattern as lib/toast.ts and lib/game-profiles.ts.
-// Deliberately NOT tied to a hook/component lifecycle: App.tsx swaps
-// FullDesktopView/BridgeView entirely depending on mode (a mode switch
-// unmounts the other one completely), so a poll owned by either view's
-// component tree would stop the moment the user switched modes. This
-// starts its own interval the instant the module is first imported (by
-// TitleBar, which both views render) and just keeps running for the life
-// of the app process, regardless of which view is currently showing.
+// Deliberately NOT tied to a hook/component lifecycle: starts its own
+// interval the instant the module is first imported (by TitleBar) and just
+// keeps running for the life of the app process.
 
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { showToast } from "./toast";

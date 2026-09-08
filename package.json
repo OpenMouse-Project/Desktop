@@ -1,15 +1,13 @@
 {
   "name": "openmouse-desktop",
   "private": true,
-  "version": "0.0.24",
+  "version": "0.0.25",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:bridge": "tsc && vite build --mode bridge",
     "preview": "vite preview",
-    "tauri": "tauri",
-    "tauri:bridge": "tauri build --config src-tauri/tauri.bridge.conf.json"
+    "tauri": "tauri"
   },
   "dependencies": {
     "@openmouse/protocol": "https://github.com/OpenMouse-Project/mouse-protocol.git",

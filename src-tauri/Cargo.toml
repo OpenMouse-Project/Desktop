@@ -1,6 +1,6 @@
 [package]
 name = "openmouse-desktop"
-version = "0.0.24"
+version = "0.0.25"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -28,14 +28,4 @@ discord-rich-presence = "1.1.0"
 sysinfo = "0.39.6"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
-# Bridge/Desktop cross-grade (src/cross_grade.rs): reqwest + tokio fetch the
-# GitHub release manifest and stream down the sibling variant's installer;
-# `open` hands the downloaded file to the OS's own installer/handler
-# (ShellExecute / xdg-open) instead of us running it ourselves. All three
-# are already pulled in transitively by tauri-plugin-updater and
-# tauri-plugin-opener — these just make the version pin and usage explicit
-# rather than relying on whatever a transitive dep happens to resolve to.
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "stream", "rustls"] }
-tokio = { version = "1", features = ["fs", "io-util"] }
-open = "5.4.1"
 

@@ -21,6 +21,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.25",
+    date: "2026-09-08",
+    changes: [
+      "Removed the separate Bridge download and the Bridge/Full Desktop mode split introduced in 0.0.24 — OpenMouse is back to one app, no first-launch prompt, no separate downloads",
+      "Fixed: OpenMouse no longer mistakes Logitech G Hub's background updater service for the main G Hub app — it was blocking connection even when G Hub itself wasn't running",
+    ],
+  },
+  {
     version: "0.0.24",
     date: "2026-09-07",
     changes: [

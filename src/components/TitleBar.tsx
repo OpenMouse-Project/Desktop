@@ -8,7 +8,7 @@ import { stageForVersion } from "../lib/version-stage";
 const win = getCurrentWindow();
 
 interface Props {
-  /** Bridge Mode's popover is too small for maximize to make sense. */
+  /** Minimal view's popover is too small for maximize to make sense. */
   showMaximize?: boolean;
 }
 
