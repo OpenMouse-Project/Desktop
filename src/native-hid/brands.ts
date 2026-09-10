@@ -30,6 +30,8 @@ import { KeychronNapeHidClient } from "@openmouse/protocol/drivers/keychron/nape
 import { LamzuHidClient } from "@openmouse/protocol/drivers/lamzu/hid";
 import { LogitechHidppClient } from "@openmouse/protocol/drivers/logitech/hidpp";
 import { ModdoHidClient } from "@openmouse/protocol/drivers/moddo/hid";
+import { MicrosoftHidClient } from "@openmouse/protocol/drivers/microsoft/hid";
+import { MICROSOFT_PRODUCTS } from "@openmouse/protocol/microsoft";
 import { NinjutsoHidClient } from "@openmouse/protocol/drivers/ninjutso/hid";
 import { OrbitalHidClient } from "@openmouse/protocol/drivers/orbital/hid";
 import { PulsarHidClient } from "@openmouse/protocol/drivers/pulsar/pulsar-hid";
@@ -74,6 +76,7 @@ export interface DriverCandidate {
    * aren't exported.
    */
   excludeProductIds?: number[];
+  includeProductIds?: number[];
 }
 
 export interface BrandEntry {
@@ -91,10 +94,12 @@ const client = (
   name: string,
   Client: new (device: HIDDevice) => unknown,
   excludeProductIds?: number[],
+  includeProductIds?: number[],
 ): DriverCandidate => ({
   name,
   Client: Client as new (device: HIDDevice) => SupportedClient,
   excludeProductIds,
+  includeProductIds,
 });
 
 export const BRAND_DRIVERS: BrandEntry[] = [
@@ -135,6 +140,7 @@ export const BRAND_DRIVERS: BrandEntry[] = [
   // that matches the product id.
   { brand: "CRDRAKO", vendorIds: [0x373e], candidates: [client("LamzuHidClient", LamzuHidClient)] },
   { brand: "moddoMOUSE", vendorIds: [0x2fe3], candidates: [client("ModdoHidClient", ModdoHidClient)] },
+  { brand: "Microsoft", vendorIds: [0x045e], candidates: [client("MicrosoftHidClient", MicrosoftHidClient, undefined, [...MICROSOFT_PRODUCTS])] },
   // NINJUTSO_VENDOR_ID (current) and NINJUTSO_LEGACY_VENDOR_ID (shared with
   // Orbital) — see mouse-protocol/src/ninjutso/index.ts.
   { brand: "Ninjutso", vendorIds: [0x093a, 0x1915], candidates: [client("NinjutsoHidClient", NinjutsoHidClient)] },
@@ -189,5 +195,6 @@ export function candidatesForVendorId(vendorId: number, productId: number): Bran
   return BRAND_DRIVERS
     .filter((entry) => entry.vendorIds.includes(vendorId))
     .flatMap((entry) => entry.candidates.map((candidate) => ({ ...candidate, brand: entry.brand })))
-    .filter((candidate) => !candidate.excludeProductIds?.includes(productId));
+    .filter((candidate) => !candidate.excludeProductIds?.includes(productId))
+    .filter((candidate) => candidate.includeProductIds === undefined || candidate.includeProductIds.includes(productId));
 }
