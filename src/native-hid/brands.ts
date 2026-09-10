@@ -24,7 +24,9 @@ import { EggWeHidClient } from "@openmouse/protocol/drivers/endgame/egg-we-hid";
 import { FantechHidClient } from "@openmouse/protocol/drivers/fantech/hid";
 import { FinalmouseHidClient } from "@openmouse/protocol/drivers/finalmouse/hid";
 import { GWolvesHidClient } from "@openmouse/protocol/drivers/gwolves/hid";
-import { KeychronHidClient } from "@openmouse/protocol/drivers/keychron/hid";
+import { HyperXHidClient } from "@openmouse/protocol/drivers/hyperx/hid";
+import { KeychronM6HidClient } from "@openmouse/protocol/drivers/keychron/m6-hid";
+import { KeychronNapeHidClient } from "@openmouse/protocol/drivers/keychron/nape-hid";
 import { LamzuHidClient } from "@openmouse/protocol/drivers/lamzu/hid";
 import { LogitechHidppClient } from "@openmouse/protocol/drivers/logitech/hidpp";
 import { ModdoHidClient } from "@openmouse/protocol/drivers/moddo/hid";
@@ -149,7 +151,10 @@ export const BRAND_DRIVERS: BrandEntry[] = [
   ] },
   { brand: "ATK", vendorIds: [0x373b], candidates: [client("AtkHidClient", AtkHidClient)] },
   { brand: "Attack Shark", vendorIds: [0x1d57, 0x25a7, 0x373e], candidates: [client("AttackSharkHidClient", AttackSharkHidClient)] },
-  { brand: "Keychron", vendorIds: [0x3434], candidates: [client("KeychronHidClient", KeychronHidClient)] },
+  { brand: "Keychron", vendorIds: [0x3434], candidates: [
+    client("KeychronM6HidClient", KeychronM6HidClient),
+    client("KeychronNapeHidClient", KeychronNapeHidClient),
+  ] },
   { brand: "Fantech", vendorIds: [0x3151], candidates: [client("FantechHidClient", FantechHidClient)] },
   { brand: "Wooting", vendorIds: [0x31e3], candidates: [client("WootingHidClient", WootingHidClient)] },
   { brand: "WALLHACK", vendorIds: [0x3879, 0x1caa], candidates: [
@@ -160,6 +165,9 @@ export const BRAND_DRIVERS: BrandEntry[] = [
   // 0x3854 wireless). The earlier 0x3603 never matched anything in the
   // protocol, so GWolves mice were silently undetected.
   { brand: "G-Wolves", vendorIds: [0x33e4], candidates: [client("GWolvesHidClient", GWolvesHidClient)] },
+  // HyperX Pulsefire Haste: Kingston-era (0x0951) and HP-era (0x03f0) wired /
+  // wireless dongle transports share one vendor-config protocol.
+  { brand: "HyperX", vendorIds: [0x0951, 0x03f0], candidates: [client("HyperXHidClient", HyperXHidClient)] },
 ];
 
 /** Every vendor id any known brand cares about, for a single HID scan. */

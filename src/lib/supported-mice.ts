@@ -163,4 +163,11 @@ export const SUPPORTED_BRANDS: SupportedBrand[] = [
     brand: "moddoMOUSE",
     models: [{ model: "moddo" }],
   },
+  {
+    brand: "HyperX",
+    models: [
+      { model: "Pulsefire Haste", note: "Kingston (0x0951) and HP (0x03f0) wired eras" },
+      { model: "Pulsefire Haste Wireless", note: "2.4 GHz dongle" },
+    ],
+  },
 ];

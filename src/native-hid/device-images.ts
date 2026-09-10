@@ -125,6 +125,12 @@ const DEVICE_IMAGES: ReadonlyMap<string, string> = new Map([
   ["1532:00b8", "/devices/razer-viper-v3-hyperspeed.png"],
   ["1532:00e5", "/devices/razer-viper-v4-pro.png"],
   ["1532:00e6", "/devices/razer-viper-v4-pro.png"],
+  // HyperX Pulsefire Haste: Kingston-era wired (0x0951:0x1727) and HP-era
+  // wired / wired-mode / wireless dongle transports share one shell.
+  ["0951:1727", "/devices/hyperx-pulsefire-haste.png"],
+  ["03f0:0f8f", "/devices/hyperx-pulsefire-haste.png"],
+  ["03f0:048e", "/devices/hyperx-pulsefire-haste.png"],
+  ["03f0:028e", "/devices/hyperx-pulsefire-haste.png"],
 ]);
 
 export const UNKNOWN_DEVICE_IMAGE = "/devices/unknown-device.png";
@@ -159,6 +165,7 @@ export function deviceImage(key: string | null | undefined, displayName = ""): s
   if (/\bmx\s*master\s*3s\b/i.test(displayName)) return "/devices/logitech-mx-master-3s.png";
   if (/\bterra\s*pro\b/i.test(displayName)) return "/devices/teevolution-terra-pro.png";
   if (/\bm-001\b/i.test(displayName)) return "/devices/wallhack-m-001.png";
+  if (/\bpulsefire\s*haste\b/i.test(displayName)) return "/devices/hyperx-pulsefire-haste.png";
   if (/\bk-001\b/i.test(displayName)) return "/devices/wallhack-k-001.png";
   // Pulsar 4K Wireless Receiver ships with the X2 V2 4K dongle kit; the
   // receiver product id is not yet published, so match the reported name.
