@@ -499,12 +499,26 @@ pub fn hid_open(
         // below, so Windows genuinely needs it mutable even though macOS
         // can't see why.
         #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
-        let mut paths: Vec<String> = api
+        let mut infos: Vec<_> = api
             .device_list()
             .filter(|info| {
                 info.vendor_id() == vendor_id
                     && info.product_id() == product_id
             })
+            .collect();
+        // Prioritize Vendor-Specific collections (>= 0xFF00) and Consumer Control (0x000C).
+        // On Linux, hidapi can open the standard mouse pointer collection (0x0001),
+        // which often acts as a black hole: it successfully accepts feature reports
+        // but drops them or returns zeroes. By trying vendor collections first,
+        // `try_each` routes the configuration protocol to the correct interface.
+        infos.sort_by_key(|info| match info.usage_page() {
+            p if p >= 0xFF00 => 0,
+            0x000C => 1,
+            _ => 2,
+        });
+        #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
+        let mut paths: Vec<String> = infos
+            .into_iter()
             .map(|info| {
                 let p = info.path().to_string_lossy().into_owned();
                 applog!(
@@ -515,6 +529,7 @@ pub fn hid_open(
                 p
             })
             .collect();
+
 
         // On Windows, merge in any extra sub-collection paths that
         // hidapi missed but SetupDi enumerated.
@@ -925,6 +940,30 @@ pub async fn hid_send_feature_report(
     result
 }
 
+#[tauri::command]
+pub async fn hid_get_input_report(
+    registry: tauri::State<'_, HidRegistry>,
+    vendor_id: u16,
+    product_id: u16,
+    report_id: u8,
+    length: usize,
+) -> Result<Vec<u8>, String> {
+    applog!("[hid] hid_get_input_report {vendor_id:04x}:{product_id:04x} reportId=0x{report_id:02x} length={length}");
+    let result = with_open_group(&registry, vendor_id, product_id, |splits, routes| {
+        let mut result: Option<Vec<u8>> = None;
+        let outcome = try_each(splits, routes, report_id, |device| {
+            let mut buffer = vec![0u8; length + 1];
+            buffer[0] = report_id;
+            let read = device.get_input_report(&mut buffer)?;
+            let data_end = read.min(buffer.len());
+            result = Some(buffer[1..data_end].to_vec());
+            Ok(())
+        });
+        outcome.and(result.ok_or_else(|| "no split returned data".to_string()))
+    });
+    applog!("[hid] hid_get_input_report done: {result:?}");
+    result
+}
 #[tauri::command]
 pub async fn hid_get_feature_report(
     registry: tauri::State<'_, HidRegistry>,
