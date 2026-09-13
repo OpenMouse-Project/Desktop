@@ -196,6 +196,12 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
       )}
 
       {/* ── DPI ──────────────────────────────────────────────────── */}
+      {/* A device whose driver cannot report a DPI value (e.g. the Attack
+          Shark X11's native channel, whose DPI command is write-only for
+          now) must not render a control whose Apply would fail with
+          "setDpi not supported". Hide the panel until it reports a real
+          DPI. */}
+      {status.dpi > 0 && (
       <div class="dpi-panel">
         <div class="dpi-panel-header">
           <div class="setting-label">
@@ -245,6 +251,7 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
 
         <p class="dpi-current-caption">Current {status.dpi} DPI</p>
       </div>
+      )}
 
       {/* ── Polling rate ─────────────────────────────────────────── */}
       {status.supportedPollingRates && status.supportedPollingRates.length > 0 && (
