@@ -60,6 +60,7 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
 
   const isLogitech = brand === "Logitech";
   const isRazer = brand === "Razer";
+  const isAttackShark = brand === "Attack Shark";
 
   const [stagedDpi, setStagedDpi] = useState(status.dpi);
   const [stagedPollingRate, setStagedPollingRate] = useState(status.pollingRateHz);
@@ -74,12 +75,17 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
   useEffect(() => { setStagedSleep(status.sleepTimeout ?? null); }, [status.sleepTimeout]);
 
   // DPI bounds: a per-brand floor. Razer caps at 8500; Logitech tops out at
-  // 32000; other brands borrow Logitech's generous bounds (the device is the
-  // source of truth — setDpi() returns the value actually applied).
-  const dpiMin = isRazer ? 100 : LOGITECH_DPI_MIN;
-  const dpiMax = isRazer ? 8500 : LOGITECH_DPI_MAX;
-  const dpiStep = isRazer ? 100 : LOGITECH_DPI_STEP;
-  const dpiPresets = isRazer ? [400, 800, 1600, 3200, 6400, 8000] : LOGITECH_DPI_PRESETS;
+  // 32000; the Attack Shark X11's sensor reaches 22,000 in 50 DPI steps.
+  // Other brands borrow Logitech's generous bounds (the device is the source
+  // of truth — setDpi() returns the value actually applied).
+  const dpiMin = isAttackShark ? 50 : isRazer ? 100 : LOGITECH_DPI_MIN;
+  const dpiMax = isAttackShark ? 22000 : isRazer ? 8500 : LOGITECH_DPI_MAX;
+  const dpiStep = isAttackShark ? 50 : isRazer ? 100 : LOGITECH_DPI_STEP;
+  const dpiPresets = isAttackShark
+    ? [400, 800, 1600, 3200, 6400, 12800, 22000]
+    : isRazer
+      ? [400, 800, 1600, 3200, 6400, 8000]
+      : LOGITECH_DPI_PRESETS;
 
   const hasSleep = typeof status.sleepTimeout === "number";
 
