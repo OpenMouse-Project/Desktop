@@ -43,6 +43,10 @@ const DEVICE_IMAGES: ReadonlyMap<string, string> = new Map([
   // Attack Shark R5 Ultra wired and wireless transports share the same shell.
   ["373e:0046", "/devices/attackshark-r5-ultra.png"],
   ["373e:0047", "/devices/attackshark-r5-ultra.png"],
+  // Attack Shark X11: wired (0xfa55) and the 2.4 GHz receiver (0xfa60) share
+  // the same shell. 0xfa61 is the R1, a different mouse.
+  ["1d57:fa55", "/devices/attackshark-x11.png"],
+  ["1d57:fa60", "/devices/attackshark-x11.png"],
   // OP1 8K, Purple Frost, and v2. XM2 models use different shells.
   ["3367:1964", "/devices/endgame-gear-op1-8k.png"],
   ["3367:1976", "/devices/endgame-gear-op1-8k.png"],
@@ -161,6 +165,7 @@ export function deviceImage(key: string | null | undefined, displayName = ""): s
   if (/\bnape\s*pro\b/i.test(displayName)) return "/devices/keychron-nape-pro.png";
   if (/\bko-one\b/i.test(displayName)) return "/devices/crdrako-ko-one.png";
   if (/\br5\s*ultra\b/i.test(displayName)) return "/devices/attackshark-r5-ultra.png";
+  if (/\battack\s*shark\s*x11\b/i.test(displayName)) return "/devices/attackshark-x11.png";
   if (/\bm[23]k\b/i.test(displayName)) return "/devices/zaunkoenig-m3k.png";
   if (/\bmx\s*master\s*3s\b/i.test(displayName)) return "/devices/logitech-mx-master-3s.png";
   if (/\bterra\s*pro\b/i.test(displayName)) return "/devices/teevolution-terra-pro.png";
