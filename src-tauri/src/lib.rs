@@ -1,7 +1,6 @@
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::TrayIcon;
 use tauri::webview::WebviewWindowBuilder;
-use tauri::{AppHandle, LogicalSize, Manager, Size, WebviewWindow, WindowEvent};
+use tauri::{AppHandle, LogicalSize, Manager, Size, WebviewWindow, WindowEvent, Wry};
 
 #[macro_use]
 mod applog;
@@ -11,6 +10,7 @@ mod games;
 mod hid;
 mod linux_permissions;
 mod resource_monitor;
+mod tray;
 use hid::{HidApiHandle, HidRegistry};
 use resource_monitor::ResourceMonitorState;
 
@@ -74,6 +74,46 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+fn on_tray_menu(app: &AppHandle, id: &str) {
+    match id {
+        "show" => show_main_window(app),
+        "quit" => app.exit(0),
+        _ => {}
+    }
+}
+
+fn on_tray_icon_event(tray: &TrayIcon<Wry>, event: tauri::tray::TrayIconEvent) {
+    // Left click toggles show/hide (only meaningful when the window still
+    // exists — nothing to hide otherwise, so that case just shows/recreates
+    // it, same as double-click). Double-click (Windows only — tray-icon
+    // doesn't report this on macOS/Linux) always shows rather than
+    // toggling: a double-click is two rapid single clicks first, so without
+    // this arm the pair would show-then-hide the window right back out from
+    // under the user. Right click opens the menu (device + battery lines,
+    // Show, Quit — see tray.rs), which tray-icon handles itself.
+    match event {
+        tauri::tray::TrayIconEvent::Click {
+            button: tauri::tray::MouseButton::Left,
+            button_state: tauri::tray::MouseButtonState::Up,
+            ..
+        } => {
+            let app = tray.app_handle();
+            match app.get_webview_window("main").map(|w| w.is_visible()) {
+                Some(Ok(true)) => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.hide();
+                    }
+                }
+                _ => show_main_window(app),
+            }
+        }
+        tauri::tray::TrayIconEvent::DoubleClick { .. } => {
+            show_main_window(tray.app_handle());
+        }
+        _ => {}
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -103,55 +143,10 @@ pub fn run() {
             conflicting_apps::detect_conflicting_apps,
             resource_monitor::sample_resource_usage,
             linux_permissions::install_udev_rules,
+            tray::tray_set_device_status,
         ])
         .setup(|app| {
-            let show = MenuItem::with_id(app, "show", "Show OpenMouse", true, None::<&str>)?;
-            let separator = PredefinedMenuItem::separator(app)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &separator, &quit])?;
-
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => show_main_window(app),
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    // Left click toggles show/hide (only meaningful when
-                    // the window still exists — nothing to hide otherwise,
-                    // so that case just shows/recreates it, same as
-                    // double-click). Double-click (Windows only —
-                    // tray-icon doesn't report this on macOS/Linux) always
-                    // shows rather than toggling: a double-click is two
-                    // rapid single clicks first, so without this arm the
-                    // pair would show-then-hide the window right back out
-                    // from under the user.
-                    match event {
-                        tauri::tray::TrayIconEvent::Click {
-                            button: tauri::tray::MouseButton::Left,
-                            button_state: tauri::tray::MouseButtonState::Up,
-                            ..
-                        } => {
-                            let app = tray.app_handle();
-                            match app.get_webview_window("main").map(|w| w.is_visible()) {
-                                Some(Ok(true)) => {
-                                    if let Some(window) = app.get_webview_window("main") {
-                                        let _ = window.hide();
-                                    }
-                                }
-                                _ => show_main_window(app),
-                            }
-                        }
-                        tauri::tray::TrayIconEvent::DoubleClick { .. } => {
-                            show_main_window(tray.app_handle());
-                        }
-                        _ => {}
-                    }
-                })
-                .build(app)?;
+            tray::build(app, on_tray_menu, on_tray_icon_event)?;
 
             if let Some(window) = app.get_webview_window("main") {
                 size_window(&window);
