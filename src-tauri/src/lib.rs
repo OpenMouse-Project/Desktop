@@ -92,6 +92,7 @@ pub fn run() {
             hid::hid_send_report,
             hid::hid_send_feature_report,
             hid::hid_get_feature_report,
+            hid::hid_get_input_report,
             discord_rpc::enable,
             discord_rpc::disable,
             discord_rpc::update_activity,
