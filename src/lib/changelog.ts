@@ -21,6 +21,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.29",
+    date: "2026-09-16",
+    changes: [
+      "New: the tray menu now shows the connected mouse and its current battery level",
+      "New: support for the Lingbao M5 Pro, Attack Shark X11, Microsoft mice, and HyperX Pulsefire Haste",
+      "Improved: Attack Shark X11 now has device artwork plus accurate DPI controls and bounds",
+    ],
+  },
+  {
     version: "0.0.28",
     date: "2026-09-08",
     changes: [

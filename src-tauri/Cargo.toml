@@ -1,6 +1,6 @@
 [package]
 name = "openmouse-desktop"
-version = "0.0.28"
+version = "0.0.29"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -28,4 +28,3 @@ discord-rich-presence = "1.1.0"
 sysinfo = "0.39.6"
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
-
