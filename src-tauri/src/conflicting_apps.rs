@@ -36,6 +36,20 @@ const CONFLICTING_APPS: &[(&str, &str)] = &[
     ("endgamegear", "Endgame Gear"),
 ];
 
+/// Process name substrings (lowercased) that would otherwise false-positive
+/// against CONFLICTING_APPS above but are known NOT to hold the HID handle
+/// — checked before the real match, so a process matching one of these is
+/// skipped entirely regardless of what it also matches.
+///
+/// CONFIRMED: LGHUB Updater (`lghub_updater.exe`) is a background updater
+/// service that ships and runs alongside G Hub — it matches "lghub" but
+/// doesn't touch the mouse's HID interface, unlike the main G Hub app/agent
+/// (`lghub.exe`, `lghub_agent.exe`). Without this exclusion, OpenMouse
+/// reports G Hub as "running" and blocks connecting even when the actual
+/// conflicting app is closed, as long as its updater service is still up
+/// (which is most of the time — it's not tied to G Hub's own lifecycle).
+const SAFE_PROCESS_SUBSTRINGS: &[&str] = &["lghub_updater"];
+
 #[derive(serde::Serialize)]
 pub struct ConflictingApp {
     pub process: String,
@@ -52,6 +66,7 @@ pub fn detect_conflicting_apps() -> Vec<ConflictingApp> {
         .processes()
         .values()
         .map(|p| p.name().to_string_lossy().to_lowercase())
+        .filter(|name| !SAFE_PROCESS_SUBSTRINGS.iter().any(|safe| name.contains(safe)))
         .collect();
 
     applog!("[conflicting] scanned {} processes", running.len());

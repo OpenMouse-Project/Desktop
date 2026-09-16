@@ -6,9 +6,6 @@
 //   0.x → Alpha
 //   1.x → Beta
 //   2.x+ → Public
-//
-// NOTE: .github/scripts/discord-release.mjs computes the same stage for the
-// Discord notification and must stay in lockstep with stageForVersion().
 
 export type ReleaseStage = "Alpha" | "Beta" | "Public";
 

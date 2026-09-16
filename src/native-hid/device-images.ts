@@ -43,6 +43,10 @@ const DEVICE_IMAGES: ReadonlyMap<string, string> = new Map([
   // Attack Shark R5 Ultra wired and wireless transports share the same shell.
   ["373e:0046", "/devices/attackshark-r5-ultra.png"],
   ["373e:0047", "/devices/attackshark-r5-ultra.png"],
+  // Attack Shark X11: wired (0xfa55) and the 2.4 GHz receiver (0xfa60) share
+  // the same shell. 0xfa61 is the R1, a different mouse.
+  ["1d57:fa55", "/devices/attackshark-x11.png"],
+  ["1d57:fa60", "/devices/attackshark-x11.png"],
   // OP1 8K, Purple Frost, and v2. XM2 models use different shells.
   ["3367:1964", "/devices/endgame-gear-op1-8k.png"],
   ["3367:1976", "/devices/endgame-gear-op1-8k.png"],
@@ -125,6 +129,12 @@ const DEVICE_IMAGES: ReadonlyMap<string, string> = new Map([
   ["1532:00b8", "/devices/razer-viper-v3-hyperspeed.png"],
   ["1532:00e5", "/devices/razer-viper-v4-pro.png"],
   ["1532:00e6", "/devices/razer-viper-v4-pro.png"],
+  // HyperX Pulsefire Haste: Kingston-era wired (0x0951:0x1727) and HP-era
+  // wired / wired-mode / wireless dongle transports share one shell.
+  ["0951:1727", "/devices/hyperx-pulsefire-haste.png"],
+  ["03f0:0f8f", "/devices/hyperx-pulsefire-haste.png"],
+  ["03f0:048e", "/devices/hyperx-pulsefire-haste.png"],
+  ["03f0:028e", "/devices/hyperx-pulsefire-haste.png"],
 ]);
 
 export const UNKNOWN_DEVICE_IMAGE = "/devices/unknown-device.png";
@@ -155,10 +165,12 @@ export function deviceImage(key: string | null | undefined, displayName = ""): s
   if (/\bnape\s*pro\b/i.test(displayName)) return "/devices/keychron-nape-pro.png";
   if (/\bko-one\b/i.test(displayName)) return "/devices/crdrako-ko-one.png";
   if (/\br5\s*ultra\b/i.test(displayName)) return "/devices/attackshark-r5-ultra.png";
+  if (/\battack\s*shark\s*x11\b/i.test(displayName)) return "/devices/attackshark-x11.png";
   if (/\bm[23]k\b/i.test(displayName)) return "/devices/zaunkoenig-m3k.png";
   if (/\bmx\s*master\s*3s\b/i.test(displayName)) return "/devices/logitech-mx-master-3s.png";
   if (/\bterra\s*pro\b/i.test(displayName)) return "/devices/teevolution-terra-pro.png";
   if (/\bm-001\b/i.test(displayName)) return "/devices/wallhack-m-001.png";
+  if (/\bpulsefire\s*haste\b/i.test(displayName)) return "/devices/hyperx-pulsefire-haste.png";
   if (/\bk-001\b/i.test(displayName)) return "/devices/wallhack-k-001.png";
   // Pulsar 4K Wireless Receiver ships with the X2 V2 4K dongle kit; the
   // receiver product id is not yet published, so match the reported name.
@@ -178,7 +190,10 @@ export function deviceImage(key: string | null | undefined, displayName = ""): s
   if (/\bmx\s*anywhere\s*3\b/i.test(displayName)) return "/devices/logitech-mx-anywhere-3.png";
   if (/\bmx\s*ergo\b/i.test(displayName)) return "/devices/logitech-mx-ergo-s.png";
   if (/\bdeathadder\s*v4\b/i.test(displayName)) return "/devices/razer-deathadder-v4-pro.png";
-  if (/\bdeathadder\s*v3\b(?!\s*pro\b)/i.test(displayName)) return "/devices/razer-deathadder-v3.png";
+  // V3 and V3 Pro are one shell (the Pro drops the cable), so the Pro shares
+  // the V3 render like the V2 family does below. It was excluded while still
+  // test-needed; verified on hardware since (mouse-protocol `0x00b7`).
+  if (/\bdeathadder\s*v3\b/i.test(displayName)) return "/devices/razer-deathadder-v3.png";
   if (/\bdeathadder\s*v2\b(?!\s*x\s*hyperspeed\b)/i.test(displayName)) return "/devices/razer-deathadder-v2.png";
   if (/\bdeathadder\s*essential\b/i.test(displayName)) return "/devices/razer-deathadder-v2.png";
   if (/\bviper\s*v3\s*hyperspeed\b/i.test(displayName)) return "/devices/razer-viper-v3-hyperspeed.png";

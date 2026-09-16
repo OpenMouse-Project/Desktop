@@ -1,9 +1,6 @@
-use std::sync::Mutex;
-
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::TrayIcon;
 use tauri::webview::WebviewWindowBuilder;
-use tauri::{AppHandle, LogicalSize, Manager, Size, State, WebviewWindow, WindowEvent};
+use tauri::{AppHandle, LogicalSize, Manager, Size, WebviewWindow, WindowEvent, Wry};
 
 #[macro_use]
 mod applog;
@@ -13,72 +10,30 @@ mod games;
 mod hid;
 mod linux_permissions;
 mod resource_monitor;
+mod tray;
 use hid::{HidApiHandle, HidRegistry};
 use resource_monitor::ResourceMonitorState;
 
-/// The two toggable app modes.
-///
-/// Bridge Mode: minimal tray-resident companion (game detection, battery
-/// alerts, native HID) — closing the window hides it to the tray, and the
-/// window itself is small (a tray-popover, not a full app window).
-/// Full Desktop Mode: the full device-configuration UI — closing the
-/// window quits the app like a normal desktop app, and the window fills
-/// 75% of the primary display.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum AppMode {
-    Bridge,
-    FullDesktop,
-}
+/// Fraction of the primary display's work area the main window should
+/// occupy on launch.
+const SCREEN_FRACTION: f64 = 0.75;
 
-/// Fixed logical size for the Bridge Mode popover window.
-const BRIDGE_WINDOW_SIZE: (f64, f64) = (320.0, 420.0);
-
-/// Fraction of the primary display's work area Full Desktop Mode's window
-/// should occupy.
-const FULL_DESKTOP_SCREEN_FRACTION: f64 = 0.75;
-
-struct ModeState(Mutex<AppMode>);
-
-fn resize_for_mode(window: &WebviewWindow, mode: AppMode) {
-    match mode {
-        AppMode::Bridge => {
-            let _ = window.set_size(Size::Logical(LogicalSize::new(
-                BRIDGE_WINDOW_SIZE.0,
-                BRIDGE_WINDOW_SIZE.1,
-            )));
-        }
-        AppMode::FullDesktop => {
-            if let Ok(Some(monitor)) = window.primary_monitor() {
-                let scale = monitor.scale_factor();
-                let logical = monitor.size().to_logical::<f64>(scale);
-                let _ = window.set_size(Size::Logical(LogicalSize::new(
-                    logical.width * FULL_DESKTOP_SCREEN_FRACTION,
-                    logical.height * FULL_DESKTOP_SCREEN_FRACTION,
-                )));
-            }
-        }
+fn size_window(window: &WebviewWindow) {
+    if let Ok(Some(monitor)) = window.primary_monitor() {
+        let scale = monitor.scale_factor();
+        let logical = monitor.size().to_logical::<f64>(scale);
+        let _ = window.set_size(Size::Logical(LogicalSize::new(
+            logical.width * SCREEN_FRACTION,
+            logical.height * SCREEN_FRACTION,
+        )));
     }
     let _ = window.center();
-}
-
-#[tauri::command]
-fn get_mode(state: State<ModeState>) -> AppMode {
-    *state.0.lock().unwrap()
-}
-
-#[tauri::command]
-fn set_mode(mode: AppMode, window: WebviewWindow, state: State<ModeState>) -> AppMode {
-    *state.0.lock().unwrap() = mode;
-    resize_for_mode(&window, mode);
-    mode
 }
 
 /// Brings the main window to front, recreating it first if it doesn't
 /// exist. On macOS, closing the last window doesn't quit the whole process
 /// (that's normal platform convention — the app, and its tray icon, stay
-/// alive) but Full Desktop Mode's close handler doesn't intercept that
-/// close, so the window itself is genuinely destroyed rather than hidden.
+/// alive) — Show OpenMouse from the tray needs somewhere to bring back.
 /// Without this, "Show OpenMouse" from the tray would find no window and
 /// silently do nothing (CONFIRMED — this is exactly what happened before
 /// this existed).
@@ -94,11 +49,10 @@ fn show_main_window(app: &AppHandle) {
             match WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()) {
                 Ok(window) => {
                     // Recreating from the static config alone gives back
-                    // its on-disk default size, not whatever mode the app
-                    // was actually in — reapply that the same way the
-                    // initial launch does (see `setup` below).
-                    let mode = *app.state::<ModeState>().0.lock().unwrap();
-                    resize_for_mode(&window, mode);
+                    // its on-disk default size, not the 75%-of-screen size
+                    // the initial launch applies — reapply that the same
+                    // way (see `setup` below).
+                    size_window(&window);
                     window
                 }
                 Err(e) => {
@@ -120,93 +74,83 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+fn on_tray_menu(app: &AppHandle, id: &str) {
+    match id {
+        "show" => show_main_window(app),
+        "quit" => app.exit(0),
+        _ => {}
+    }
+}
+
+fn on_tray_icon_event(tray: &TrayIcon<Wry>, event: tauri::tray::TrayIconEvent) {
+    // Left click toggles show/hide (only meaningful when the window still
+    // exists — nothing to hide otherwise, so that case just shows/recreates
+    // it, same as double-click). Double-click (Windows only — tray-icon
+    // doesn't report this on macOS/Linux) always shows rather than
+    // toggling: a double-click is two rapid single clicks first, so without
+    // this arm the pair would show-then-hide the window right back out from
+    // under the user. Right click opens the menu (device + battery lines,
+    // Show, Quit — see tray.rs), which tray-icon handles itself.
+    match event {
+        tauri::tray::TrayIconEvent::Click {
+            button: tauri::tray::MouseButton::Left,
+            button_state: tauri::tray::MouseButtonState::Up,
+            ..
+        } => {
+            let app = tray.app_handle();
+            match app.get_webview_window("main").map(|w| w.is_visible()) {
+                Some(Ok(true)) => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.hide();
+                    }
+                }
+                _ => show_main_window(app),
+            }
+        }
+        tauri::tray::TrayIconEvent::DoubleClick { .. } => {
+            show_main_window(tray.app_handle());
+        }
+        _ => {}
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(ModeState(Mutex::new(AppMode::FullDesktop)))
         .manage(discord_rpc::DiscordRpcState::default())
         .manage(HidRegistry::default())
         .manage(HidApiHandle::default())
         .manage(ResourceMonitorState::default())
         .manage(games::ProcessListState::default())
         .invoke_handler(tauri::generate_handler![
-            get_mode,
-            set_mode,
             hid::hid_list_interfaces,
             hid::hid_open,
             hid::hid_close,
             hid::hid_send_report,
             hid::hid_send_feature_report,
             hid::hid_get_feature_report,
+            hid::hid_get_input_report,
             discord_rpc::enable,
             discord_rpc::disable,
             discord_rpc::update_activity,
             applog::get_logs,
             applog::export_logs,
+            applog::log_line,
             games::running_process_names,
             games::scan_installed_games,
             conflicting_apps::detect_conflicting_apps,
             resource_monitor::sample_resource_usage,
             linux_permissions::install_udev_rules,
+            tray::tray_set_device_status,
         ])
         .setup(|app| {
-            let show = MenuItem::with_id(app, "show", "Show OpenMouse", true, None::<&str>)?;
-            let separator = PredefinedMenuItem::separator(app)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &separator, &quit])?;
+            tray::build(app, on_tray_menu, on_tray_icon_event)?;
 
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => show_main_window(app),
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    // Left click toggles show/hide (only meaningful when
-                    // the window still exists — nothing to hide otherwise,
-                    // so that case just shows/recreates it, same as
-                    // double-click). Double-click (Windows only —
-                    // tray-icon doesn't report this on macOS/Linux) always
-                    // shows rather than toggling: a double-click is two
-                    // rapid single clicks first, so without this arm the
-                    // pair would show-then-hide the window right back out
-                    // from under the user.
-                    match event {
-                        tauri::tray::TrayIconEvent::Click {
-                            button: tauri::tray::MouseButton::Left,
-                            button_state: tauri::tray::MouseButtonState::Up,
-                            ..
-                        } => {
-                            let app = tray.app_handle();
-                            match app.get_webview_window("main").map(|w| w.is_visible()) {
-                                Some(Ok(true)) => {
-                                    if let Some(window) = app.get_webview_window("main") {
-                                        let _ = window.hide();
-                                    }
-                                }
-                                _ => show_main_window(app),
-                            }
-                        }
-                        tauri::tray::TrayIconEvent::DoubleClick { .. } => {
-                            show_main_window(tray.app_handle());
-                        }
-                        _ => {}
-                    }
-                })
-                .build(app)?;
-
-            // Size the window to match the initial mode (Full Desktop by
-            // default — see ModeState above).
             if let Some(window) = app.get_webview_window("main") {
-                let state = app.state::<ModeState>();
-                let mode = *state.0.lock().unwrap();
-                resize_for_mode(&window, mode);
+                size_window(&window);
             }
 
             // The overlay window (game-switch toasts — src/OverlayApp.tsx)
@@ -238,13 +182,14 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // In Bridge Mode, closing the window hides it to the tray instead
-            // of quitting — the companion process keeps running. In Full
-            // Desktop Mode, closing behaves like a normal app quit.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let state = window.state::<ModeState>();
-                let mode = *state.0.lock().unwrap();
-                if mode == AppMode::Bridge {
+            // Closing the main window hides it to the tray instead of
+            // quitting — the app (and its tray icon) keeps running.
+            // "Quit" from the tray menu is the actual exit. Guarded to the
+            // main window specifically so this doesn't interfere with the
+            // overlay window's own show/hide, which it manages itself (see
+            // OverlayApp.tsx).
+            if window.label() == "main" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = window.hide();
                 }

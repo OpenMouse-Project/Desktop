@@ -21,6 +21,44 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.0.28",
+    date: "2026-09-08",
+    changes: [
+      "Fixed: the Games list could get stuck on an outdated snapshot for up to a week — the app's own local HTTP cache was holding onto the first copy it ever fetched even after the source was updated. It now always fetches the current list.",
+    ],
+  },
+  {
+    version: "0.0.27",
+    date: "2026-09-08",
+    changes: [
+      "Diagnostics: whether the Games list loads from the live feed or the app's own built-in copy is now recorded in Settings → Download Logs, so a missing/outdated game is easier to track down",
+    ],
+  },
+  {
+    version: "0.0.26",
+    date: "2026-09-08",
+    changes: [
+      "The Games list is now fetched live instead of bundled with the app — new games can be added without an update. This release is what turns that on; no action needed beyond installing it.",
+    ],
+  },
+  {
+    version: "0.0.25",
+    date: "2026-09-08",
+    changes: [
+      "Removed the separate Bridge download and the Bridge/Full Desktop mode split introduced in 0.0.24 — OpenMouse is back to one app, no first-launch prompt, no separate downloads",
+      "Fixed: OpenMouse no longer mistakes Logitech G Hub's background updater service for the main G Hub app — it was blocking connection even when G Hub itself wasn't running",
+    ],
+  },
+  {
+    version: "0.0.24",
+    date: "2026-09-07",
+    changes: [
+      "New: OpenMouse Bridge — a separate, lightweight download for anyone who just wants the tray companion (game detection, battery alerts, native device support) without the full device-configuration app. First launch of either build now asks which one you want; switch anytime from Settings, and it fetches and installs the other one automatically if you don't have it yet",
+      "Fixed: closing the window in Full Desktop Mode now hides it to the tray instead of quitting the app, matching Bridge Mode",
+      "Fixed: the app's mode (Bridge vs Full Desktop) is now actually remembered between launches — it previously reset every time",
+    ],
+  },
+  {
     version: "0.0.23",
     date: "2026-09-04",
     changes: [

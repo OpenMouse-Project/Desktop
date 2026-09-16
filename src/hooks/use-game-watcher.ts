@@ -57,6 +57,51 @@ export type GamesListState =
 // background poll (use-mouse-connection.ts's device auto-refresh) in spirit.
 const POLL_INTERVAL_MS = 4000;
 
+// Hosted straight out of this (public) repo via jsDelivr's GitHub CDN, so
+// adding/editing a game is just a commit+push to games.json — no app
+// rebuild or release. jsDelivr fronts raw.githubusercontent.com with real
+// caching (~12-24h TTL, purgeable), unlike raw GitHub's tight unauthenticated
+// rate limits. Falls back to the bundled /games.json (shipped in public/,
+// same file) if the network's unavailable or the CDN is unreachable, so the
+// Games page still works offline / on first run before any fetch succeeds.
+const REMOTE_GAMES_URL = "https://cdn.jsdelivr.net/gh/OpenMouse-Project/Desktop@main/public/games.json";
+const LOCAL_GAMES_URL = "/games.json";
+
+// Best-effort — recorded into the same ring buffer Settings' "Download
+// Logs" button exports, so a report of "my new game isn't showing up" is
+// diagnosable (remote fetch failed vs. served stale-but-successful vs.
+// fell back to the bundled copy) without needing DevTools on a production
+// build.
+function logLine(line: string) {
+  void invoke("log_line", { line: `[games] ${line}` }).catch(() => {});
+}
+
+async function fetchGamesFile(): Promise<GamesFile> {
+  try {
+    // `cache: "no-store"` bypasses WebView2/WebKit's own local HTTP cache,
+    // which otherwise honors the CDN's Cache-Control max-age and keeps
+    // serving whatever it first fetched for up to a week — independent of,
+    // and surviving past, any jsDelivr edge purge. This is the one request
+    // per launch this hook makes; the CDN's own edge caching still does the
+    // real work of not hammering the origin repo.
+    const response = await fetch(REMOTE_GAMES_URL, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Could not load games (${response.status})`);
+    const data = (await response.json()) as GamesFile;
+    logLine(`loaded ${data.games.length} games from remote CDN (${REMOTE_GAMES_URL})`);
+    return data;
+  } catch (error) {
+    // Remote fetch failed (offline, DNS, CDN hiccup) — fall back to the
+    // copy bundled with the app itself.
+    const message = error instanceof Error ? error.message : String(error);
+    logLine(`remote fetch failed (${message}), falling back to bundled ${LOCAL_GAMES_URL}`);
+    const response = await fetch(LOCAL_GAMES_URL);
+    if (!response.ok) throw new Error(`Could not load games (${response.status})`);
+    const data = (await response.json()) as GamesFile;
+    logLine(`loaded ${data.games.length} games from bundled local copy`);
+    return data;
+  }
+}
+
 /**
  * Whichever game currently "owns" the mouse's live settings — i.e. the most
  * recent game to auto-apply a profile that hasn't closed yet — along with
@@ -107,13 +152,8 @@ export function useGameWatcher(connection: MouseConnection) {
   const activeOverrideRef = useRef<ActiveOverride | null>(null);
 
   useEffect(() => {
-    fetch("/games.json")
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Could not load games (${response.status})`);
-        }
-        const data = (await response.json()) as GamesFile;
-
+    fetchGamesFile()
+      .then(async (data) => {
         // Collect each launcher's known IDs from the games list
         const knownSteamIds = data.games
           .filter((g) => g.steamAppId)

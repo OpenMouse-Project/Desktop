@@ -55,6 +55,16 @@ pub fn get_logs() -> Vec<String> {
     snapshot()
 }
 
+/// Lets the frontend record a line into the same buffer as the Rust side's
+/// own `applog!` call sites — for diagnostics that only make sense from JS
+/// (e.g. which URL a `fetch()` actually resolved through, or why it fell
+/// back), so "Download Logs" captures the full picture rather than only the
+/// backend half of it.
+#[tauri::command]
+pub fn log_line(line: String) {
+    log(line);
+}
+
 /// Writes the current buffer to a timestamped file under the app's log
 /// directory and returns its absolute path — the frontend hands that back
 /// to the user (and can reveal it via the already-installed

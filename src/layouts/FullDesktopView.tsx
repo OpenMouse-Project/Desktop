@@ -10,15 +10,9 @@ import { useMouseConnection } from "../hooks/use-mouse-connection";
 import { useResourceMonitor } from "../hooks/use-resource-monitor";
 import { useGameWatcher } from "../hooks/use-game-watcher";
 
-type AppMode = "bridge" | "full-desktop";
 type Page = "overview" | "games" | "supported" | "settings";
 
-interface Props {
-  mode: AppMode;
-  onModeChange: (mode: AppMode) => void;
-}
-
-export function FullDesktopView({ mode, onModeChange }: Props) {
+export function FullDesktopView() {
   const [page, setPage] = useState<Page>("overview");
   const connection = useMouseConnection();
   const resourceMonitor = useResourceMonitor();
@@ -38,7 +32,7 @@ export function FullDesktopView({ mode, onModeChange }: Props) {
             ) : page === "supported" ? (
               <SupportedPage />
             ) : (
-              <SettingsPage mode={mode} onModeChange={onModeChange} resourceMonitor={resourceMonitor} />
+              <SettingsPage resourceMonitor={resourceMonitor} />
             )}
           </div>
         </div>

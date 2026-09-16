@@ -36,6 +36,13 @@ import { showToast } from "../lib/toast";
 // manual refresh is still running just silently skips (isHidBusyError)
 // rather than piling up or corrupting anything.
 const AUTO_REFRESH_INTERVAL_MS = 5000;
+// How often to re-read while nobody can see the window (minimized, hidden to
+// the tray, or just not the focused app). The tray menu shows the battery
+// from the cached status (see tray.rs), and a level frozen at whatever it was
+// when the window was last looked at is what Synapse's tray notably does NOT
+// do. One full walk a minute is cheap enough to keep that line honest
+// without paying the 5 s cadence for a panel nobody is watching.
+const HIDDEN_REFRESH_INTERVAL_MS = 60_000;
 
 interface ConflictingApp {
   process: string;
@@ -115,6 +122,9 @@ export function useMouseConnection() {
   // it. Assume focused until told otherwise — the event may not have fired
   // yet on first mount.
   const windowFocusedRef = useRef(true);
+  // When the last successful walk finished, so the hidden-window cadence
+  // below can be measured from real reads rather than from interval ticks.
+  const lastReadAtRef = useRef(0);
 
   const connect = useCallback(async (candidate: CandidateInterface, opts?: { silent?: boolean }) => {
     const key = candidate.info.key;
@@ -126,6 +136,7 @@ export function useMouseConnection() {
     setConnectingKey(key);
     try {
       const device = await connectToInterface(candidate.info);
+      lastReadAtRef.current = Date.now();
       setConnected(device);
       lastCandidateRef.current = candidate;
       rememberDevice(candidate.info, device.brand);
@@ -264,14 +275,33 @@ export function useMouseConnection() {
       // A full readStatus() walk (5 splits opened, 20-30 HID++ round
       // trips) every 5s adds up if it keeps running while nobody can even
       // see the result — minimized, hidden to the tray, occluded, or just
-      // not the focused window right now. Skip the tick entirely rather
-      // than spend that on a window nobody's actively looking at.
-      if (document.hidden || !windowFocusedRef.current) return;
+      // not the focused window right now. Drop to the slow cadence there
+      // (the tray menu still shows the battery from this cache) rather
+      // than spend the full rate on a window nobody's actively looking at.
+      if (document.hidden || !windowFocusedRef.current) {
+        if (Date.now() - lastReadAtRef.current < HIDDEN_REFRESH_INTERVAL_MS) return;
+      }
       if (lastCandidateRef.current) void connect(lastCandidateRef.current, { silent: true });
     }, AUTO_REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected?.key, connect]);
+
+  // Mirror the cached device name and battery into the tray menu (tray.rs),
+  // so a right-click on the tray icon shows the charge without bringing the
+  // window back. Keyed on the three fields the menu shows, not on `connected`
+  // itself, so a patchStatus() that changes only DPI doesn't re-send it.
+  const trayName = connected?.status.name ?? null;
+  const trayBattery = connected?.status.batteryPercent ?? null;
+  const trayBatteryState = connected?.status.batteryState ?? null;
+  useEffect(() => {
+    const status = trayName === null
+      ? null
+      : { name: trayName, batteryPercent: trayBattery, batteryState: trayBatteryState ?? "Unknown" };
+    // Tray text is cosmetic — a failure here (tray failed to build at
+    // startup, say) shouldn't surface as a device error.
+    void invoke("tray_set_device_status", { status }).catch(() => {});
+  }, [trayName, trayBattery, trayBatteryState]);
 
   // Just switches back to the list — the snapshot stays cached (see module
   // docs above). Re-scans in the background so a newly plugged-in device

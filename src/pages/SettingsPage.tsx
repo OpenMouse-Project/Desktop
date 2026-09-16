@@ -4,7 +4,6 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { Bell, FileDown, ScrollText } from "lucide-preact";
-import { ModeToggle } from "../components/ModeToggle";
 import { ResourceMonitor } from "../components/ResourceMonitor";
 import { ChangelogModal } from "../components/ChangelogModal";
 import { UpdateAvailableModal } from "../components/UpdateAvailableModal";
@@ -17,13 +16,12 @@ import type { ResourceMonitorData } from "../hooks/use-resource-monitor";
 import { getThemeState, saveThemeState, THEME_PRESETS, type ThemeState } from "../lib/themes";
 
 
-type AppMode = "bridge" | "full-desktop";
 const DISCORD_RPC_PREFERENCE = "openmouse.discord-rpc.enabled";
 
 // Short abbreviations, not the icons this had before (disliked) or the
 // full "Top left"/"Bottom right" labels (too wide to reliably fit 4 in one
-// row down in Bridge Mode's 320px popover) — the full name is still there,
-// as a tooltip. A plain flex row, not .segmented-group (a fixed 3-column
+// row) — the full name is still there, as a tooltip. A plain flex row, not
+// .segmented-group (a fixed 3-column
 // grid built for 3-option pickers like Gaming Surface) — CONFIRMED the
 // cause of a real bug: reusing it here wrapped the 4th corner onto its own
 // row regardless of how narrow the buttons were.
@@ -35,13 +33,10 @@ const CORNER_OPTIONS: { corner: OverlayCorner; abbr: string }[] = [
 ];
 
 interface Props {
-  mode: AppMode;
-  onModeChange: (mode: AppMode) => void;
-  /** Omitted in Bridge Mode's compact popover — no room for sparkline charts there. */
-  resourceMonitor?: ResourceMonitorData;
+  resourceMonitor: ResourceMonitorData;
 }
 
-export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
+export function SettingsPage({ resourceMonitor }: Props) {
   const [exporting, setExporting] = useState(false);
   const [checkingForUpdates, setCheckingForUpdates] = useState(false);
   const [version, setVersion] = useState("");
@@ -162,31 +157,6 @@ export function SettingsPage({ mode, onModeChange, resourceMonitor }: Props) {
   return (
     <section class="page">
       <h1 class="page-title">Settings</h1>
-
-      <div class="setting-row">
-        <div class="setting-label">
-          <span class="setting-title">Mode</span>
-          <span class="setting-description">
-            {mode === "bridge"
-              ? "Minimal tray companion — game detection, battery alerts. Closing this window keeps it running in the tray."
-              : "Full device configuration — DPI, polling rate, RGB, firmware."}
-          </span>
-        </div>
-        <ModeToggle mode={mode} onChange={onModeChange} />
-      </div>
-
-      <div class="setting-row">
-        <div class="setting-label">
-          <span class="setting-title">Start Bridge Mode at login</span>
-          <span class="setting-description">
-            Launch the tray companion automatically when you sign in.
-          </span>
-        </div>
-        <label class="switch">
-          <input type="checkbox" />
-          <span class="switch-track" />
-        </label>
-      </div>
 
       <div class="setting-row">
         <div class="setting-label">
