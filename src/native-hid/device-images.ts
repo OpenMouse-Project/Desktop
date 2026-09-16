@@ -190,7 +190,10 @@ export function deviceImage(key: string | null | undefined, displayName = ""): s
   if (/\bmx\s*anywhere\s*3\b/i.test(displayName)) return "/devices/logitech-mx-anywhere-3.png";
   if (/\bmx\s*ergo\b/i.test(displayName)) return "/devices/logitech-mx-ergo-s.png";
   if (/\bdeathadder\s*v4\b/i.test(displayName)) return "/devices/razer-deathadder-v4-pro.png";
-  if (/\bdeathadder\s*v3\b(?!\s*pro\b)/i.test(displayName)) return "/devices/razer-deathadder-v3.png";
+  // V3 and V3 Pro are one shell (the Pro drops the cable), so the Pro shares
+  // the V3 render like the V2 family does below. It was excluded while still
+  // test-needed; verified on hardware since (mouse-protocol `0x00b7`).
+  if (/\bdeathadder\s*v3\b/i.test(displayName)) return "/devices/razer-deathadder-v3.png";
   if (/\bdeathadder\s*v2\b(?!\s*x\s*hyperspeed\b)/i.test(displayName)) return "/devices/razer-deathadder-v2.png";
   if (/\bdeathadder\s*essential\b/i.test(displayName)) return "/devices/razer-deathadder-v2.png";
   if (/\bviper\s*v3\s*hyperspeed\b/i.test(displayName)) return "/devices/razer-viper-v3-hyperspeed.png";
