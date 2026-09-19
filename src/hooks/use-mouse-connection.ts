@@ -36,13 +36,31 @@ import { showToast } from "../lib/toast";
 // manual refresh is still running just silently skips (isHidBusyError)
 // rather than piling up or corrupting anything.
 const AUTO_REFRESH_INTERVAL_MS = 5000;
-// How often to re-read while nobody can see the window (minimized, hidden to
-// the tray, or just not the focused app). The tray menu shows the battery
-// from the cached status (see tray.rs), and a level frozen at whatever it was
-// when the window was last looked at is what Synapse's tray notably does NOT
-// do. One full walk a minute is cheap enough to keep that line honest
-// without paying the 5 s cadence for a panel nobody is watching.
+// Slower cadences for the states where the 5 s walk is more than the
+// situation is worth, chosen so the status never stops moving altogether.
+// Before these existed the refresh simply *skipped* whenever the window was
+// unfocused or the Performance tab was open, and the practical result (a real
+// user report) was a battery figure and a Wired/Wireless label that only
+// changed after quitting and relaunching the app. The window is very often
+// visible while another app has focus, and the Performance tab is where
+// people actually sit.
+//
+// - Visible but not the focused window: someone may well be glancing at it.
+// - Performance tab open: a landing read used to look like a reconnect while
+//   the user was mid-edit, so it stays gentle. The tab's staged values only
+//   reset when the device value actually changes (DevicePerformanceTab.tsx),
+//   so a read that comes back unchanged costs nothing on screen.
+// - Hidden (minimized / tray): only the tray menu shows anything (tray.rs).
+const UNFOCUSED_REFRESH_INTERVAL_MS = 15_000;
+const EDITING_REFRESH_INTERVAL_MS = 30_000;
 const HIDDEN_REFRESH_INTERVAL_MS = 60_000;
+// How often to re-enumerate HID interfaces while something is connected. A
+// plain hidapi device-list refresh, nothing is opened, so it is cheap enough
+// to run this often. It is what notices the cable going in or out: the mouse
+// enumerates as a *different* product id over USB than over its receiver, so
+// "wireless -> wired" is not a status change on the connected interface, it
+// is a new interface appearing and the old one going quiet.
+const TRANSPORT_SCAN_INTERVAL_MS = 3000;
 
 interface ConflictingApp {
   process: string;
@@ -80,6 +98,31 @@ export type CandidateListState =
   | { status: "loading" }
   | { status: "loaded"; candidates: CandidateInterface[] }
   | { status: "error"; message: string };
+
+/**
+ * Whether two interfaces are plausibly the same physical mouse reached over
+ * different transports (cable vs. receiver). Vendors give the two separate
+ * product ids but the same product string, sometimes with a transport word
+ * bolted on ("(Wired)", "Wireless", "Dongle"), so compare on the name with
+ * those stripped. This is only the *pre-filter*: the status read that follows
+ * confirms with the unit id / serial where the driver reports one.
+ */
+export function isSiblingTransport(
+  a: Pick<HidInterfaceInfo, "key" | "vendorId" | "productString">,
+  b: Pick<HidInterfaceInfo, "key" | "vendorId" | "productString">,
+): boolean {
+  if (a.key === b.key || a.vendorId !== b.vendorId) return false;
+  const norm = (name: string) =>
+    name
+      .toLowerCase()
+      .replace(/\b(wired|wireless|dongle|receiver|hyperspeed|lightspeed|2\.4g(?:hz)?|usb)\b/g, "")
+      .replace(/[()\-_]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const na = norm(a.productString);
+  const nb = norm(b.productString);
+  return na.length > 0 && na === nb;
+}
 
 export function useMouseConnection() {
   const [list, setList] = useState<CandidateListState>({ status: "loading" });
@@ -125,6 +168,19 @@ export function useMouseConnection() {
   // When the last successful walk finished, so the hidden-window cadence
   // below can be measured from real reads rather than from interval ticks.
   const lastReadAtRef = useRef(0);
+  // Interface keys seen by the last transport scan, so a scan can tell a
+  // newly-appeared interface from one that has been sitting there all along.
+  const seenKeysRef = useRef<Set<string> | null>(null);
+  // A transport switch is a connect() of its own; never start a second one
+  // while the first is still walking the device.
+  const switchingRef = useRef(false);
+  // The interface we were on when the mouse vanished mid-session (cable or
+  // dongle pulled). While set, the scan below keeps looking for it, or its
+  // sibling transport, and reconnects on its own when either shows up. The
+  // launch-time auto-reconnect is deliberately one-shot (see refresh()); this
+  // is the in-session counterpart, scoped to a device that was connected and
+  // then physically went away, not to whatever the user last browsed.
+  const awaitingReturnRef = useRef<HidInterfaceInfo | null>(null);
 
   const connect = useCallback(async (candidate: CandidateInterface, opts?: { silent?: boolean }) => {
     const key = candidate.info.key;
@@ -137,6 +193,7 @@ export function useMouseConnection() {
     try {
       const device = await connectToInterface(candidate.info);
       lastReadAtRef.current = Date.now();
+      awaitingReturnRef.current = null;
       setConnected(device);
       lastCandidateRef.current = candidate;
       rememberDevice(candidate.info, device.brand);
@@ -207,7 +264,11 @@ export function useMouseConnection() {
       if (!autoReconnectAttempted.current && !connectedRef.current) {
         autoReconnectAttempted.current = true;
         const remembered = getRememberedDevice();
-        const match = remembered && candidates.find((c) => c.info.key === remembered.key);
+        // Exact key first; failing that, the same mouse on its other transport
+        // (remembered over the cable, launched with only the receiver in, say).
+        const match = remembered
+          && (candidates.find((c) => c.info.key === remembered.key)
+            ?? candidates.find((c) => isSiblingTransport(c.info, remembered)));
         // Silent: a remembered device that's simply not plugged in yet
         // shouldn't greet the user with an error toast on every launch.
         if (match) void connect(match, { silent: true });
@@ -271,21 +332,132 @@ export function useMouseConnection() {
   useEffect(() => {
     if (!connected) return;
     const interval = setInterval(() => {
-      if (autoRefreshPausedRef.current) return;
-      // A full readStatus() walk (5 splits opened, 20-30 HID++ round
-      // trips) every 5s adds up if it keeps running while nobody can even
-      // see the result — minimized, hidden to the tray, occluded, or just
-      // not the focused window right now. Drop to the slow cadence there
-      // (the tray menu still shows the battery from this cache) rather
-      // than spend the full rate on a window nobody's actively looking at.
-      if (document.hidden || !windowFocusedRef.current) {
-        if (Date.now() - lastReadAtRef.current < HIDDEN_REFRESH_INTERVAL_MS) return;
-      }
+      // A full readStatus() walk (5 splits opened, 20-30 HID++ round trips)
+      // every 5 s adds up when nobody is looking at the result, so the
+      // cadence follows what the user can currently see. Whichever slow
+      // state applies, the read still happens eventually: the old behaviour
+      // of skipping outright is what left battery and connection type stale
+      // until a relaunch. The tick itself stays at 5 s; the slower states
+      // just let more ticks go by since the last successful read.
+      let due = AUTO_REFRESH_INTERVAL_MS;
+      if (document.hidden) due = HIDDEN_REFRESH_INTERVAL_MS;
+      else if (!windowFocusedRef.current) due = UNFOCUSED_REFRESH_INTERVAL_MS;
+      if (autoRefreshPausedRef.current) due = Math.max(due, EDITING_REFRESH_INTERVAL_MS);
+      if (Date.now() - lastReadAtRef.current < due) return;
+      if (switchingRef.current) return;
       if (lastCandidateRef.current) void connect(lastCandidateRef.current, { silent: true });
     }, AUTO_REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected?.key, connect]);
+
+  // Transport hot-swap. Re-enumerates interfaces on a short timer (nothing is
+  // opened) and reacts to two events for the connected mouse:
+  //
+  // 1. Its interface disappeared (cable unplugged, receiver pulled): connect
+  //    to the same mouse on whatever sibling transport is still present, or
+  //    fall back to the device list if there is none.
+  // 2. A sibling interface appeared (cable plugged into a mouse that was on
+  //    its receiver): read it, and if the unit id says it is the same mouse,
+  //    move to it when it is the wired side. Wired is where the mouse really
+  //    is at that point (the receiver often keeps answering from a cache),
+  //    and it is the only side that reports charging. The reverse (dongle
+  //    inserted while wired) deliberately does not switch.
+  //
+  // Both used to need a quit and relaunch, because nothing re-scanned once
+  // something was connected and the auto-reconnect only ever ran once.
+  const [awaitingReturn, setAwaitingReturn] = useState(false);
+  useEffect(() => {
+    if (!connected && !awaitingReturn) {
+      seenKeysRef.current = null;
+      return;
+    }
+    const interval = setInterval(async () => {
+      if (switchingRef.current) return;
+      let candidates: CandidateInterface[];
+      try {
+        candidates = await listCandidateInterfaces();
+      } catch {
+        return;
+      }
+      // 0. Waiting for a mouse that went away: reconnect the moment it, or
+      //    its other transport, is back. Silent connect; the success toast
+      //    and the switch to the device view come from connect() itself.
+      const awaiting = awaitingReturnRef.current;
+      if (!connectedRef.current) {
+        if (!awaiting) return;
+        const back = candidates.find((c) => c.info.key === awaiting.key)
+          ?? candidates.find((c) => isSiblingTransport(c.info, awaiting));
+        if (back) {
+          setList((prev) => (prev.status === "loaded" ? { status: "loaded", candidates } : prev));
+          await connect(back);
+          if (connectedRef.current) setAwaitingReturn(false);
+        }
+        return;
+      }
+      const current = connectedRef.current;
+      const currentInfo = lastCandidateRef.current?.info;
+      if (!current || !currentInfo) return;
+      const keys = new Set(candidates.map((c) => c.info.key));
+      const seen = seenKeysRef.current;
+      seenKeysRef.current = keys;
+      // Keep the device list current too, quietly (no loading flicker), so
+      // "Back" shows what is actually plugged in right now.
+      setList((prev) => {
+        if (prev.status !== "loaded") return prev;
+        const same = prev.candidates.length === candidates.length
+          && prev.candidates.every((c, i) => c.info.key === candidates[i].info.key);
+        return same ? prev : { status: "loaded", candidates };
+      });
+
+      const switchTo = async (target: CandidateInterface, expectWired: boolean): Promise<boolean> => {
+        switchingRef.current = true;
+        try {
+          const device = await connectToInterface(target.info);
+          // Same mouse? The serial settles it where the driver reports one;
+          // the product-string match already got us here otherwise.
+          const sameUnit = device.status.unitId == null || current.status.unitId == null
+            || device.status.unitId === current.status.unitId;
+          if (!sameUnit) return false;
+          if (expectWired && device.status.connectionType !== "Wired") return false;
+          lastReadAtRef.current = Date.now();
+          setConnected(device);
+          lastCandidateRef.current = target;
+          rememberDevice(target.info, device.brand);
+          showToast(`${device.status.name}: now ${device.status.connectionType?.toLowerCase() ?? "connected"}.`, "success");
+          return true;
+        } catch (error) {
+          if (!isHidBusyError(error)) {
+            const message = error instanceof Error ? error.message : String(error);
+            void invoke("log_line", { line: `[transport] switch to ${target.info.key} failed: ${message}` }).catch(() => {});
+          }
+          return false;
+        } finally {
+          switchingRef.current = false;
+        }
+      };
+
+      if (!keys.has(current.key)) {
+        // 1. Gone. Try a sibling; otherwise drop to the list.
+        const sibling = candidates.find((c) => isSiblingTransport(c.info, currentInfo));
+        if (sibling && (await switchTo(sibling, false))) return;
+        awaitingReturnRef.current = currentInfo;
+        setAwaitingReturn(true);
+        setConnected(null);
+        lastCandidateRef.current = null;
+        setView("list");
+        showToast(`${current.status.name} disconnected. It will reconnect when plugged back in.`, "error");
+        return;
+      }
+      if (seen && current.status.connectionType !== "Wired") {
+        // 2. Something new since the last scan that looks like this mouse.
+        const appeared = candidates.find((c) => !seen.has(c.info.key) && isSiblingTransport(c.info, currentInfo));
+        if (appeared) await switchTo(appeared, true);
+      }
+    }, TRANSPORT_SCAN_INTERVAL_MS);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected?.key, awaitingReturn]);
 
   // Mirror the cached device name and battery into the tray menu (tray.rs),
   // so a right-click on the tray icon shows the charge without bringing the
