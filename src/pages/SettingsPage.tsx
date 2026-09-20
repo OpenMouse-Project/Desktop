@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import type { Update } from "@tauri-apps/plugin-updater";
-import { Bell, FileDown, ScrollText } from "lucide-preact";
+import { Bell, Copy, FileDown, ScrollText } from "lucide-preact";
 import { ResourceMonitor } from "../components/ResourceMonitor";
 import { ChangelogModal } from "../components/ChangelogModal";
 import { UpdateAvailableModal } from "../components/UpdateAvailableModal";
@@ -14,6 +14,16 @@ import { CORNER_LABELS, getOverlaySettings, saveOverlaySettings, type OverlayCor
 import { getVersion } from "@tauri-apps/api/app";
 import type { ResourceMonitorData } from "../hooks/use-resource-monitor";
 import { getThemeState, saveThemeState, THEME_PRESETS, type ThemeState } from "../lib/themes";
+import {
+  buildStreamOverlayUrl,
+  disableStreamOverlay,
+  enableStreamOverlay,
+  getStreamOverlayFields,
+  getStreamOverlayUrl,
+  isStreamOverlayEnabled,
+  saveStreamOverlayFields,
+  type StreamOverlayFields,
+} from "../lib/stream-overlay";
 
 
 const DISCORD_RPC_PREFERENCE = "openmouse.discord-rpc.enabled";
@@ -50,10 +60,60 @@ export function SettingsPage({ resourceMonitor }: Props) {
   const [overlaySettings, setOverlaySettings] = useState<OverlaySettings>(() => getOverlaySettings());
   const [theme, setTheme] = useState<ThemeState>(() => getThemeState());
   const [themeEditorOpen, setThemeEditorOpen] = useState(false);
+  const [streamOverlayEnabled, setStreamOverlayEnabled] = useState(() => isStreamOverlayEnabled());
+  const [streamOverlayUrl, setStreamOverlayUrl] = useState<string | null>(null);
+  const [streamOverlayError, setStreamOverlayError] = useState("");
+  const [streamOverlayCopied, setStreamOverlayCopied] = useState(false);
+  const [streamOverlayFields, setStreamOverlayFields] = useState<StreamOverlayFields>(() => getStreamOverlayFields());
 
   useEffect(() => {
     void getVersion().then(setVersion);
   }, []);
+
+  // Restarts the server on app launch if the user had it on last session —
+  // the preference (localStorage) persists across restarts but the actual
+  // tiny_http server (stream_overlay.rs) does not.
+  useEffect(() => {
+    if (!isStreamOverlayEnabled()) return;
+    enableStreamOverlay()
+      .then(setStreamOverlayUrl)
+      .catch((error) => setStreamOverlayError(error instanceof Error ? error.message : String(error)));
+  }, []);
+
+  async function toggleStreamOverlay(enabled: boolean) {
+    setStreamOverlayError("");
+    setStreamOverlayEnabled(enabled);
+    try {
+      if (enabled) {
+        setStreamOverlayUrl(await enableStreamOverlay());
+      } else {
+        await disableStreamOverlay();
+        setStreamOverlayUrl(null);
+      }
+    } catch (error) {
+      setStreamOverlayEnabled(!enabled);
+      setStreamOverlayError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function copyStreamOverlayUrl() {
+    const base = streamOverlayUrl ?? (await getStreamOverlayUrl().catch(() => null));
+    if (!base) return;
+    try {
+      await navigator.clipboard.writeText(buildStreamOverlayUrl(base, streamOverlayFields));
+      setStreamOverlayCopied(true);
+      setTimeout(() => setStreamOverlayCopied(false), 1500);
+    } catch {
+      // Clipboard permission denied or unavailable — the URL is still
+      // shown as plain text, so the user can select and copy it manually.
+    }
+  }
+
+  function toggleStreamOverlayField(field: keyof StreamOverlayFields, value: boolean) {
+    const next = { ...streamOverlayFields, [field]: value };
+    setStreamOverlayFields(next);
+    saveStreamOverlayFields(next);
+  }
 
   // Every hid.rs diagnostic line (device open/close, HID++ traffic, decoded
   // errors — see src-tauri/src/applog.rs) is captured in a ring buffer as it
@@ -327,6 +387,90 @@ export function SettingsPage({ resourceMonitor }: Props) {
           <button class="rescan-button" onClick={testOverlay}>
             <Bell size={14} /> Test
           </button>
+        </div>
+      </div>
+
+      <div class="setting-row setting-row-block">
+        <div class="setting-label">
+          <span class="setting-title discord-setting-title">
+            OBS overlay
+            {streamOverlayError && (
+              <span
+                class="setting-error-badge"
+                data-tooltip={streamOverlayError}
+                aria-label={`OBS overlay error: ${streamOverlayError}`}
+                tabIndex={0}
+              >
+                Error
+              </span>
+            )}
+          </span>
+          <span class="setting-description">
+            Runs a small local page showing your connected mouse — add it in OBS as a Browser Source.
+          </span>
+        </div>
+        <div class="overlay-settings-controls">
+          <label class="switch">
+            <input
+              type="checkbox"
+              checked={streamOverlayEnabled}
+              onChange={(event) => void toggleStreamOverlay(event.currentTarget.checked)}
+            />
+            <span class="switch-track" />
+          </label>
+
+          {streamOverlayEnabled && streamOverlayUrl && (
+            <>
+              <div class="overlay-settings-row">
+                <span class="setting-eyebrow">Fields</span>
+                <div class="stream-overlay-field-picker">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={streamOverlayFields.name}
+                      onChange={(e) => toggleStreamOverlayField("name", e.currentTarget.checked)}
+                    />
+                    Device name
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={streamOverlayFields.dpi}
+                      onChange={(e) => toggleStreamOverlayField("dpi", e.currentTarget.checked)}
+                    />
+                    DPI
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={streamOverlayFields.polling}
+                      onChange={(e) => toggleStreamOverlayField("polling", e.currentTarget.checked)}
+                    />
+                    Polling rate
+                  </label>
+                </div>
+              </div>
+
+              <div class="overlay-settings-row">
+                <span class="setting-eyebrow">Preview</span>
+                <div class="stream-overlay-preview">
+                  <iframe
+                    key={buildStreamOverlayUrl(streamOverlayUrl, streamOverlayFields)}
+                    src={buildStreamOverlayUrl(streamOverlayUrl, streamOverlayFields)}
+                    title="OBS overlay preview"
+                  />
+                </div>
+              </div>
+
+              <div class="overlay-settings-row">
+                <span class="setting-eyebrow">Browser Source URL</span>
+                <code>{buildStreamOverlayUrl(streamOverlayUrl, streamOverlayFields)}</code>
+                <button class="rescan-button" onClick={() => void copyStreamOverlayUrl()}>
+                  <Copy size={14} /> {streamOverlayCopied ? "Copied!" : "Copy"}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

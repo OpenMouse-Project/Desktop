@@ -10,6 +10,7 @@ mod games;
 mod hid;
 mod linux_permissions;
 mod resource_monitor;
+mod stream_overlay;
 mod tray;
 use hid::{HidApiHandle, HidRegistry};
 use resource_monitor::ResourceMonitorState;
@@ -125,6 +126,7 @@ pub fn run() {
         .manage(HidApiHandle::default())
         .manage(ResourceMonitorState::default())
         .manage(games::ProcessListState::default())
+        .manage(stream_overlay::StreamOverlayState::default())
         .invoke_handler(tauri::generate_handler![
             hid::hid_list_interfaces,
             hid::hid_open,
@@ -145,6 +147,10 @@ pub fn run() {
             resource_monitor::sample_resource_usage,
             linux_permissions::install_udev_rules,
             tray::tray_set_device_status,
+            stream_overlay::stream_overlay_start,
+            stream_overlay::stream_overlay_stop,
+            stream_overlay::stream_overlay_status,
+            stream_overlay::stream_overlay_set_device_status,
         ])
         .setup(|app| {
             tray::build(app, on_tray_menu, on_tray_icon_event)?;

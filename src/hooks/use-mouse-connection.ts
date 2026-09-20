@@ -28,6 +28,7 @@ import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
 import { getRememberedDevice, rememberDevice } from "../native-hid/device-store";
 import { isHidBusyError } from "../native-hid/hid-open-lock";
 import { showToast } from "../lib/toast";
+import { isStreamOverlayEnabled, pushStreamOverlayStatus } from "../lib/stream-overlay";
 
 // How often a connected device's status re-reads itself in the background,
 // so battery/DPI/etc. drift on their own instead of only updating after an
@@ -474,6 +475,20 @@ export function useMouseConnection() {
     // startup, say) shouldn't surface as a device error.
     void invoke("tray_set_device_status", { status }).catch(() => {});
   }, [trayName, trayBattery, trayBatteryState]);
+
+  // Same cache, pushed to the OBS overlay server (stream_overlay.rs) — a
+  // separate effect from the tray one above because the overlay cares about
+  // DPI/polling rate too, which the tray menu doesn't show and so isn't in
+  // its dependency list. A no-op on the Rust side when the user hasn't
+  // turned the overlay on, so this just always fires rather than tracking
+  // the setting's own effect.
+  const overlayDpi = connected?.status.dpi ?? null;
+  const overlayPollingRateHz = connected?.status.pollingRateHz ?? null;
+  useEffect(() => {
+    if (!isStreamOverlayEnabled()) return;
+    const status = trayName === null ? null : { name: trayName, dpi: overlayDpi, pollingRateHz: overlayPollingRateHz };
+    void pushStreamOverlayStatus(status).catch(() => {});
+  }, [trayName, overlayDpi, overlayPollingRateHz]);
 
   // Just switches back to the list — the snapshot stays cached (see module
   // docs above). Re-scans in the background so a newly plugged-in device
