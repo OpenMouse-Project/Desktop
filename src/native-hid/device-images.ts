@@ -139,6 +139,172 @@ const DEVICE_IMAGES: ReadonlyMap<string, string> = new Map([
 
 export const UNKNOWN_DEVICE_IMAGE = "/devices/unknown-device.png";
 
+/** Where the visible product sits inside its artwork, as canvas fractions. */
+export interface ArtBounds {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Canvas width / height, so a caller can reason about rendered width. */
+  aspect: number;
+}
+
+const BOUNDS_KEY = "openmouse:art-bounds";
+
+/**
+ * Alpha at or below this counts as empty. Product shots fade out over their
+ * last few pixels and some carry a soft floor shadow, neither of which is the
+ * mouse — including them would inflate the bounds and shrink the product.
+ */
+const INK_ALPHA = 24;
+
+/** Fraction of the (square) art box one device's artwork should occupy. */
+const ART_TARGET = 0.5;
+
+/** Cap on either dimension's share of the art box, so a subject can never be
+ *  normalised right up against the tile's edges. */
+const ART_MAX_EXTENT = 50;
+
+function readBoundsCache(): Record<string, ArtBounds> {
+  try {
+    const raw = localStorage.getItem(BOUNDS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, ArtBounds>) : {};
+  } catch {
+    return {};
+  }
+}
+
+const boundsCache = readBoundsCache();
+
+function measureInk(image: HTMLImageElement): ArtBounds | null {
+  const width = image.naturalWidth;
+  const height = image.naturalHeight;
+  if (!width || !height) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+  context.drawImage(image, 0, 0);
+  const { data } = context.getImageData(0, 0, width, height);
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (data[(y * width + x) * 4 + 3] <= INK_ALPHA) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < 0) return null;
+  return {
+    x: minX / width,
+    y: minY / height,
+    w: (maxX - minX + 1) / width,
+    h: (maxY - minY + 1) / height,
+    aspect: width / height,
+  };
+}
+
+/**
+ * Where the product actually is inside one artwork, measured from its alpha
+ * channel once per asset and cached in localStorage.
+ *
+ * The assets are framed inconsistently — the DeathAdder render is a square
+ * canvas whose mouse fills ~35% of the width, the Superlight's is a portrait
+ * canvas it fills edge to edge — so nothing about the canvas tells a tile how
+ * big the mouse is. Only measuring does.
+ */
+export async function artBounds(src: string): Promise<ArtBounds | null> {
+  const known = boundsCache[src];
+  if (known) return known;
+  const image = new Image();
+  image.src = src;
+  try {
+    await image.decode();
+  } catch {
+    return null;
+  }
+  const bounds = measureInk(image);
+  if (!bounds) return null;
+  boundsCache[src] = bounds;
+  try {
+    localStorage.setItem(BOUNDS_KEY, JSON.stringify(boundsCache));
+  } catch {
+    // Best-effort: losing the cache only means measuring again next launch.
+  }
+  return bounds;
+}
+
+/**
+ * Inline style that renders one artwork so its *subject* — not its canvas —
+ * comes out the same size as every other tile's.
+ *
+ * The image is sized as a percentage of the square art box and scaled about
+ * the subject's own centre: `sqrt(w*h)` is the subject's linear size in canvas
+ * fractions, so making that constant across assets makes the mice match
+ * regardless of how each render is framed. The second term keeps a wide
+ * subject inside the box (the canvas may overflow; only its transparent
+ * margins get clipped).
+ *
+ * Returns null when the bounds are unknown, which leaves the caller's plain
+ * `contain` behaviour in place.
+ */
+export function deviceArtStyle(bounds: ArtBounds | null, target = ART_TARGET): string | null {
+  if (!bounds) return null;
+  // The subject's linear size is the square root of its *rendered* area, so
+  // the canvas aspect belongs in it: a portrait canvas draws the same subject
+  // fraction onto a narrower element.
+  const linear = Math.sqrt(bounds.w * bounds.h * bounds.aspect);
+  if (!(linear > 0)) return null;
+  // Both clamps keep the *subject* inside the box (the canvas may overflow;
+  // only its transparent margins are clipped). Without the height one, a
+  // narrow mouse normalised by area grows taller than the tile and loses its
+  // nose and cable.
+  const height = Math.min(
+    (100 * target) / linear,
+    ART_MAX_EXTENT / Math.max(bounds.aspect * bounds.w, 0.01),
+    ART_MAX_EXTENT / Math.max(bounds.h, 0.01),
+  );
+  const offsetX = (0.5 - (bounds.x + bounds.w / 2)) * 100;
+  const offsetY = (0.5 - (bounds.y + bounds.h / 2)) * 100;
+  return [
+    `height:${height.toFixed(2)}%`,
+    "left:50%",
+    "top:50%",
+    `transform:translate(-50%,-50%) translate(${offsetX.toFixed(2)}%,${offsetY.toFixed(2)}%)`,
+  ].join(";");
+}
+
+/**
+ * `onError` handler for a device-artwork `<img>`: retries the real source once
+ * before settling for `unknown-device.png`.
+ *
+ * The retry is the point. A single transient failure — a dev-server reload
+ * rewriting the page mid-request, a file momentarily unreadable — used to
+ * latch the placeholder onto that `<img>` for the rest of the page load, so a
+ * mouse whose artwork was sitting right there in `public/devices/` showed the
+ * generic tile and looked unsupported. (CONFIRMED: a DeathAdder V3
+ * HyperSpeed, whose render resolves correctly to razer-deathadder-v3.png,
+ * displayed the placeholder in the device list.) The retry carries a query
+ * string so the browser cannot reuse its cached failure for that URL; static
+ * files ignore query strings, so the same artwork is fetched.
+ */
+export function deviceImageFallback(event: Event): void {
+  const img = event.currentTarget as HTMLImageElement;
+  if (img.src.endsWith(UNKNOWN_DEVICE_IMAGE)) return;
+  const source = img.getAttribute("src") ?? "";
+  if (!source.includes("retry=")) {
+    img.src = `${source}${source.includes("?") ? "&" : "?"}retry=1`;
+    return;
+  }
+  img.src = UNKNOWN_DEVICE_IMAGE;
+}
+
 /**
  * Best-known product photo for a device. `key` is `HidInterfaceInfo.key` /
  * `ConnectedDevice.key`; `displayName` is the product/friendly name (from

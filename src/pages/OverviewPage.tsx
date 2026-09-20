@@ -3,19 +3,15 @@ import { ArrowLeft, Battery, Gamepad2, Info, RefreshCw, Settings2, SlidersHorizo
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import type { MouseConnection } from "../hooks/use-mouse-connection";
 import type { ActiveGameOverride } from "../hooks/use-game-watcher";
-import { deviceImage, UNKNOWN_DEVICE_IMAGE } from "../native-hid/device-images";
+import { deviceImage, deviceImageFallback } from "../native-hid/device-images";
+import { getDeviceName } from "../native-hid/device-store";
+import { DeviceTile } from "../components/DeviceTile";
 import { DevicePerformanceTab } from "../components/DevicePerformanceTab";
 import { DeviceLightingTab } from "../components/DeviceLightingTab";
 import { DeviceAdvancedTab } from "../components/DeviceAdvancedTab";
 import { DeviceButtonsTab } from "../components/DeviceButtonsTab";
 import { ConflictingAppsModal } from "../components/ConflictingAppsModal";
 import { useConflictingApps } from "../hooks/use-conflicting-apps";
-
-function fallbackToUnknownDevice(event: Event) {
-  const img = event.currentTarget as HTMLImageElement;
-  if (img.src.endsWith(UNKNOWN_DEVICE_IMAGE)) return;
-  img.src = UNKNOWN_DEVICE_IMAGE;
-}
 
 /** Brand → typical feature set shown in the device list before connecting. */
 const BRAND_FEATURES: Record<string, { icon: typeof Gauge; label: string }[]> = {
@@ -149,6 +145,7 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
     connectedInfo,
     view,
     connectingKey,
+    failedKey,
     select,
     refresh,
     back,
@@ -214,9 +211,13 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
       typeof status.activeProfile === "number";
     if (hasAdvanced) tabs.push({ id: "advanced", icon: Settings2, label: "Advanced" });
 
+    // Gated on the device actually reporting lighting: the generic Razer
+    // client has no lighting at all (its class has no setLighting and never
+    // sets `lighting`), so forcing the tab for every Razer opened it onto "No
+    // lighting data available" — while the Razer models that *do* report it
+    // (Cobra, Viper Mini) still get it through these same two checks.
     const hasLighting = !!(status.lighting) ||
-      (status.lightingZones && status.lightingZones.length > 0) ||
-      connected.brand === "Razer";
+      (status.lightingZones && status.lightingZones.length > 0);
     if (hasLighting) {
       tabs.push({ id: "lighting", icon: Lightbulb, label: "Lighting" });
     }
@@ -271,7 +272,7 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
                 <img
                   class="device-showcase-image"
                   src={deviceImage(connected.key, status.name)}
-                  onError={fallbackToUnknownDevice}
+                  onError={deviceImageFallback}
                   alt={status.name}
                 />
               </div>
@@ -455,52 +456,36 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
       {list.status === "loaded" && list.candidates.length > 0 && (
         <>
           <h1 class="page-title">Devices</h1>
-          <ul class="device-list">
+          <ul class={`device-grid device-grid--${Math.min(list.candidates.length, 4) || 1}`}>
             {list.candidates.map((candidate) => {
               const primaryBrand = candidate.brands[0];
-              const features = primaryBrand ? BRAND_FEATURES[primaryBrand] : undefined;
+              const isConnected = connected?.key === candidate.info.key;
+              const isConnecting = connectingKey === candidate.info.key;
+              // What the device said it is, when it has ever answered: a
+              // receiver's own name is "USB Receiver" and its artwork is a
+              // placeholder, while the mouse behind it has both. Falls back to
+              // the live status for a device connected in this session, then to
+              // whatever the interface called itself.
+              const displayName = (isConnected ? connected?.status.name : null)
+                ?? getDeviceName(candidate.info.key)
+                ?? candidate.info.productString;
+              const state = isConnecting
+                ? "connecting"
+                : isConnected
+                  ? "connected"
+                  : failedKey === candidate.info.key
+                    ? "error"
+                    : "idle";
               return (
-                <li class="device-list-row" key={candidate.info.key}>
-                  <div class="device-list-row-main">
-                    <img
-                      class="device-list-row-image"
-                      src={deviceImage(candidate.info.key, candidate.info.productString)}
-                      onError={fallbackToUnknownDevice}
-                      alt=""
-                    />
-                    <div class="device-list-row-info">
-                      <span class="device-list-row-name">
-                        {candidate.info.productString || "Unknown device"}
-                      </span>
-                      <span class="device-list-row-meta">
-                        {candidate.brands.join(" / ")} · {candidate.info.vendorId.toString(16).padStart(4, "0")}:
-                        {candidate.info.productId.toString(16).padStart(4, "0")}
-                      </span>
-                    </div>
-                  </div>
-                  <div class="device-list-row-tags">
-                    {features && (
-                      <div class="device-capability-tags">
-                        {features.map((f) => (
-                          <span key={f.label} class="device-capability-tag">
-                            <f.icon size={11} /> {f.label}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    class="connect-button"
-                    disabled={connectingKey === candidate.info.key}
-                    onClick={() => select(candidate)}
-                  >
-                    {connectingKey === candidate.info.key
-                      ? "Connecting…"
-                      : connected?.key === candidate.info.key
-                        ? "View"
-                        : "Connect"}
-                  </button>
-                </li>
+                <DeviceTile
+                  key={candidate.info.key}
+                  candidate={candidate}
+                  displayName={displayName}
+                  features={primaryBrand ? BRAND_FEATURES[primaryBrand] : undefined}
+                  state={state}
+                  battery={isConnected ? connected?.status.batteryPercent ?? null : null}
+                  onSelect={() => select(candidate)}
+                />
               );
             })}
           </ul>

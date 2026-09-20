@@ -1,17 +1,11 @@
 import logo from "../assets/logo.png";
 import type { ConnectedDevice } from "../native-hid/scan";
-import { deviceImage, UNKNOWN_DEVICE_IMAGE } from "../native-hid/device-images";
+import { deviceImage, deviceImageFallback } from "../native-hid/device-images";
 
 interface Props {
   connected: ConnectedDevice | null;
   /** Jump to this device's card — no-op target when nothing is connected. */
   onSelectDevice: () => void;
-}
-
-function fallbackToUnknownDevice(event: Event) {
-  const img = event.currentTarget as HTMLImageElement;
-  if (img.src.endsWith(UNKNOWN_DEVICE_IMAGE)) return;
-  img.src = UNKNOWN_DEVICE_IMAGE;
 }
 
 export function Sidebar({ connected, onSelectDevice }: Props) {
@@ -28,7 +22,7 @@ export function Sidebar({ connected, onSelectDevice }: Props) {
             <img
               class="sidebar-device-photo"
               src={deviceImage(connected.key, connected.status.name)}
-              onError={fallbackToUnknownDevice}
+              onError={deviceImageFallback}
               alt=""
             />
             <span class="sidebar-device-dot" aria-hidden="true" />
