@@ -1,4 +1,5 @@
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
+import { TEEVOLUTION_PERFORMANCE_TIME_LABELS } from "@openmouse/protocol/teevolution";
 import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
 import {
   setCpiLevels,
@@ -259,7 +260,7 @@ export function DeviceAdvancedTab({ info, status, onApplied, readOnly }: Props) 
               <Segmented
                 label="System mode"
                 value={status.ninjutsoSystemMode}
-                options={(status.ninjutsoSystemModes ?? ["High Speed", "Competitive", "Ultra"]) as typeof status.ninjutsoSystemMode[]}
+                options={(status.ninjutsoSystemModes ?? []) as typeof status.ninjutsoSystemMode[]}
                 disabled={disabled}
                 onChange={(mode) =>
                   void writeToast("System mode", setNinjutsoSystemMode(info, mode), onApplied, () => ({ ninjutsoSystemMode: mode }))}
@@ -393,9 +394,15 @@ export function DeviceAdvancedTab({ info, status, onApplied, readOnly }: Props) 
                   );
                 }}
               >
-                <option value={0}>Off</option>
-                <option value={1}>Steady</option>
-                <option value={2}>Breathing</option>
+                {/* `ui.dpiLighting.modes` is the protocol saying which of the
+                    normalized effects this device actually has (0 off, 1
+                    steady, 2 breathing) — offering all three regardless is
+                    how the app let someone pick an effect that then failed. */}
+                {(status.ui?.dpiLighting?.modes ?? [0, 1, 2]).map((mode) => (
+                  <option key={mode} value={mode}>
+                    {mode === 0 ? "Off" : mode === 1 ? "Steady" : "Breathing"}
+                  </option>
+                ))}
               </select>
             </div>
           )}
@@ -416,8 +423,8 @@ export function DeviceAdvancedTab({ info, status, onApplied, readOnly }: Props) 
                     () => ({ performanceDuration: v }));
                 }}
               >
-                {[10, 30, 60, 180, 300, 600].map((v) => (
-                  <option key={v} value={v}>{v > 60 ? `${Math.round(v / 60)} min` : `${v} min`}</option>
+                {TEEVOLUTION_PERFORMANCE_TIME_LABELS.map(([code, label]) => (
+                  <option key={code} value={code}>{label}</option>
                 ))}
               </select>
             </div>
@@ -451,7 +458,11 @@ export function DeviceAdvancedTab({ info, status, onApplied, readOnly }: Props) 
                   void writeToast("Profile", setProfile(info, v), onApplied, () => ({ activeProfile: v }));
                 }}
               >
-                {[1, 2, 3, 4, 5].map((v) => <option key={v} value={v}>{v}</option>)}
+                {/* The protocol's own range: PulsarProHidClient.setProfile()
+                    accepts 1–6 (and rejects anything else), so the list this
+                    used to build stopped one short and left profile 6
+                    unreachable. */}
+                {[1, 2, 3, 4, 5, 6].map((v) => <option key={v} value={v}>{v}</option>)}
               </select>
             </div>
           )}

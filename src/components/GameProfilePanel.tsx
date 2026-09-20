@@ -3,7 +3,7 @@ import { ArrowLeft, Trash2, Zap } from "lucide-preact";
 import type { Game } from "../hooks/use-game-watcher";
 import type { MouseConnection } from "../hooks/use-mouse-connection";
 import type { CandidateInterface } from "../native-hid/scan";
-import { deviceImage, UNKNOWN_DEVICE_IMAGE } from "../native-hid/device-images";
+import { deviceImage, deviceImageFallback } from "../native-hid/device-images";
 import {
   applyGameProfile,
   clearGameProfile,
@@ -14,13 +14,8 @@ import {
   type GameProfile,
 } from "../lib/game-profiles";
 import { DPI_MAX, DPI_MIN, DPI_PRESETS, DPI_STEP, GAMING_SURFACE_MODES } from "../lib/logitech-controls";
+import { deviceCapabilities, dpiBounds } from "../native-hid/write";
 import { showToast } from "../lib/toast";
-
-function fallbackToUnknownDevice(event: Event) {
-  const img = event.currentTarget as HTMLImageElement;
-  if (img.src.endsWith(UNKNOWN_DEVICE_IMAGE)) return;
-  img.src = UNKNOWN_DEVICE_IMAGE;
-}
 
 interface Props {
   game: Game;
@@ -63,6 +58,14 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
   const status = connected?.status;
   const canControl = connectedInfo !== null;
   const showSeparateAxes = status?.supportsSeparateDpiAxes === true;
+  // Same device-provided bounds the Performance tab offers (its own
+  // MouseUiHints hint, then its driver's ceiling) with the Logitech-wide
+  // defaults as the last resort — a profile typed here should be limited to
+  // what this mouse will actually accept.
+  const { min: dpiMin, max: dpiMax, step: dpiStep } = status && connectedInfo
+    ? dpiBounds(status, deviceCapabilities(connectedInfo), { min: DPI_MIN, max: DPI_MAX, step: DPI_STEP })
+    : { min: DPI_MIN, max: DPI_MAX, step: DPI_STEP };
+  const dpiPresets = DPI_PRESETS.filter((preset) => preset >= dpiMin && preset <= dpiMax);
 
   // "Not set" isn't a real state a field can be in — every field starts
   // from whatever's already saved, or failing that, whatever the connected
@@ -146,7 +149,25 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
       firstRun.current = false;
       return;
     }
-    saveGameProfile(game.id, buildProfile());
+    // ...but not right after Clear: `handleClear` re-seeds these inputs from
+    // the connected device, which changes them just like an edit would, so
+    // this effect used to immediately write the deleted profile straight
+    // back — "Cleared profile for X." followed by the entry reappearing (and
+    // the panel later re-seeding from those clear-time values). Nothing
+    // stored plus a profile that is exactly the device's current settings,
+    // with auto-apply off, is that re-seed and not an edit. Anything the
+    // user actually changes afterwards differs from the device or turns
+    // auto-apply on, so it still saves.
+    const profile = buildProfile();
+    const current = connection.connected?.status;
+    const isJustTheDevice = !getGameProfile(game.id) && current !== undefined && !profile.autoApply
+      && profile.dpi === current.dpi
+      && (profile.dpiY ?? undefined) === (current.dpiY ?? undefined)
+      && (profile.pollingRateHz ?? undefined) === (current.pollingRateHz ?? undefined)
+      && (profile.liftOffDistance ?? undefined) === (current.liftOffDistance ?? undefined)
+      && (profile.gamingSurfaceMode ?? undefined) === (current.gamingSurfaceMode ?? undefined);
+    if (isJustTheDevice) return;
+    saveGameProfile(game.id, profile);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dpiInput, dpiYInput, pollingRateHz, liftOffDistance, gamingSurfaceMode, autoApply]);
 
@@ -255,7 +276,7 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
                       <img
                         class="device-list-row-image"
                         src={deviceImage(candidate.info.key, candidate.info.productString)}
-                        onError={fallbackToUnknownDevice}
+                        onError={deviceImageFallback}
                         alt=""
                       />
                       <div class="device-list-row-info">
@@ -302,7 +323,7 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
             </div>
 
             <div class="dpi-preset-grid">
-              {DPI_PRESETS.map((preset) => (
+              {dpiPresets.map((preset) => (
                 <button
                   key={preset}
                   class={`dpi-preset ${String(preset) === dpiInput ? "active" : ""}`}
@@ -321,9 +342,9 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
                 <span>{showSeparateAxes ? "X axis" : "DPI"}</span>
                 <input
                   type="number"
-                  min={DPI_MIN}
-                  max={DPI_MAX}
-                  step={DPI_STEP}
+                  min={dpiMin}
+                  max={dpiMax}
+                  step={dpiStep}
                   placeholder="e.g. 1600"
                   value={dpiInput}
                   onInput={(event) => setDpiInput((event.target as HTMLInputElement).value)}
@@ -334,9 +355,9 @@ export function GameProfilePanel({ game, connection, onClose }: Props) {
                   <span>Y axis</span>
                   <input
                     type="number"
-                    min={DPI_MIN}
-                    max={DPI_MAX}
-                    step={DPI_STEP}
+                    min={dpiMin}
+                    max={dpiMax}
+                    step={dpiStep}
                     placeholder="e.g. 1600"
                     value={dpiYInput}
                     onInput={(event) => setDpiYInput((event.target as HTMLInputElement).value)}

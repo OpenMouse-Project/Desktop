@@ -9,6 +9,8 @@ import {
   setPollingRate as logitechSetPollingRate,
 } from "../native-hid/logitech-actions";
 import {
+  deviceCapabilities,
+  dpiBounds,
   setActiveDpiStage,
   setAngleSnapping,
   setDebounceTime,
@@ -33,6 +35,7 @@ interface Props {
   info: HidInterfaceInfo;
   status: MouseStatus;
   brand: string;
+  /** The capability lists only the driver class knows come from the registry now — see write.ts. */
   onApplied: (patch: Partial<MouseStatus>) => void;
   lockedBy?: string;
   readOnly?: boolean;
@@ -58,39 +61,96 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
   const locked = lockedBy !== undefined;
   const [pending, setPending] = useState(false);
 
+  // Valid values for the controls whose options are set by the device's own
+  // protocol, asked of the driver class that answered it (see write.ts) —
+  // hardcoding them here is what made the sleep and debounce controls reject
+  // almost every value on every brand that didn't match the guess.
+  const capabilities = deviceCapabilities(info);
+
   const isLogitech = brand === "Logitech";
   const isRazer = brand === "Razer";
   const isAttackShark = brand === "Attack Shark";
 
   const [stagedDpi, setStagedDpi] = useState(status.dpi);
+  const [stagedDpiY, setStagedDpiY] = useState(status.dpiY ?? status.dpi);
+  /**
+   * Mice with separate X/Y axes (the Razer family reports
+   * `supportsSeparateDpiAxes`) get one DPI control that moves both axes
+   * together, with an explicit unlock for anyone who wants them apart.
+   *
+   * Linked is the default because the alternative is silent: this panel shows
+   * a single number, so writing only the staged X while the mouse keeps its
+   * own Y puts the two axes on different sensitivities with nothing on screen
+   * saying so — the mouse then tracks X and Y (and therefore diagonals) at
+   * different speeds. Omitting Y entirely is what "linked" means for every
+   * driver: their own `setDpi(dpi, dpiY = dpi)` defaults it to X.
+   */
+  const [unlinkedAxes, setUnlinkedAxes] = useState(false);
+  const hasSeparateAxes = status.supportsSeparateDpiAxes === true;
   const [stagedPollingRate, setStagedPollingRate] = useState(status.pollingRateHz);
   const [stagedLod, setStagedLod] = useState(status.liftOffDistance);
   const [stagedSurface, setStagedSurface] = useState(status.gamingSurfaceMode);
   const [stagedSleep, setStagedSleep] = useState(status.sleepTimeout ?? null);
 
   useEffect(() => { setStagedDpi(status.dpi); }, [status.dpi]);
+  useEffect(() => { setStagedDpiY(status.dpiY ?? status.dpi); }, [status.dpiY, status.dpi]);
   useEffect(() => { setStagedPollingRate(status.pollingRateHz); }, [status.pollingRateHz]);
   useEffect(() => { setStagedLod(status.liftOffDistance); }, [status.liftOffDistance]);
   useEffect(() => { setStagedSurface(status.gamingSurfaceMode); }, [status.gamingSurfaceMode]);
   useEffect(() => { setStagedSleep(status.sleepTimeout ?? null); }, [status.sleepTimeout]);
 
-  // DPI bounds: a per-brand floor. Razer caps at 8500; Logitech tops out at
-  // 32000; the Attack Shark X11's sensor reaches 22,000 in 50 DPI steps.
-  // Other brands borrow Logitech's generous bounds (the device is the source
-  // of truth — setDpi() returns the value actually applied).
-  const dpiMin = isAttackShark ? 50 : isRazer ? 100 : LOGITECH_DPI_MIN;
-  const dpiMax = isAttackShark ? 22000 : isRazer ? 8500 : LOGITECH_DPI_MAX;
-  const dpiStep = isAttackShark ? 50 : isRazer ? 100 : LOGITECH_DPI_STEP;
-  const dpiPresets = isAttackShark
+  // Bounds for the DPI field: the device's own protocol-provided limits
+  // (MouseUiHints.dpiStageEditor, then its driver's ceiling) ahead of these
+  // branded fallbacks — see dpiBounds().
+  const { min: dpiMin, max: dpiMax, step: dpiStep } = dpiBounds(status, capabilities, {
+    min: isAttackShark ? 50 : isRazer ? 100 : LOGITECH_DPI_MIN,
+    max: isAttackShark ? 22000 : isRazer ? 8500 : LOGITECH_DPI_MAX,
+    step: isAttackShark ? 50 : isRazer ? 100 : LOGITECH_DPI_STEP,
+  });
+  const dpiPresets = (isAttackShark
     ? [400, 800, 1600, 3200, 6400, 12800, 22000]
     : isRazer
       ? [400, 800, 1600, 3200, 6400, 8000]
-      : LOGITECH_DPI_PRESETS;
+      : LOGITECH_DPI_PRESETS).filter((preset) => preset >= dpiMin && preset <= dpiMax);
 
-  const hasSleep = typeof status.sleepTimeout === "number";
+  // The device's own UI policy, straight from the protocol (MouseUiHints).
+  // It exists so a driver can say which controls are meaningful for its
+  // protocol generation, and ignoring it is why the app offered switches and
+  // cards that do nothing on some devices.
+  const ui = status.ui;
+
+  // `hideLodLow` — no low setting in this firmware; `lodRequiresSurface` —
+  // lift-off only applies while a gaming surface mode is selected.
+  const loftOffValues = (status.supportedLiftOffDistances ?? [])
+    .filter((value) => !(ui?.hideLodLow && value === "Low"));
+  const loftOffDisabled = ui?.lodRequiresSurface === true && status.gamingSurfaceMode === "Off";
+
+  const visibleToggles = ADVANCED_TOGGLES.filter(({ key }) => {
+    if (ui?.hideProcessingCard) return false;
+    if (key === "motionSync") return !ui?.hideMotionSync;
+    if (key === "angleSnapping") return !ui?.hideAngleSnapping;
+    if (key === "rippleControl") return !ui?.hideRippleControl;
+    return true;
+  });
+
+  // Debounce: the driver's own list when it publishes one, otherwise every
+  // value up to the ceiling it reports. Null when this protocol generation has
+  // no such control at all (Ninjutso reports a ceiling of 0), so the row is
+  // hidden rather than offering values the mouse rejects.
+  const debounceValues = typeof status.debounceMs === "number"
+    ? capabilities.debounceOptions
+      ?? (capabilities.debounceMaxMs !== null
+        ? Array.from({ length: capabilities.debounceMaxMs + 1 }, (_, ms) => ms)
+        : null)
+    : null;
+
+  const hasSleep = typeof status.sleepTimeout === "number"
+    && !ui?.hideSleepCard
+    && capabilities.sleepTimeouts !== null;
 
   const dirty =
     stagedDpi !== status.dpi ||
+    (hasSeparateAxes && unlinkedAxes && stagedDpiY !== status.dpiY) ||
     stagedPollingRate !== status.pollingRateHz ||
     stagedLod !== status.liftOffDistance ||
     stagedSurface !== status.gamingSurfaceMode ||
@@ -100,6 +160,7 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
 
   function revert() {
     setStagedDpi(status.dpi);
+    setStagedDpiY(status.dpiY ?? status.dpi);
     setStagedPollingRate(status.pollingRateHz);
     setStagedLod(status.liftOffDistance);
     setStagedSurface(status.gamingSurfaceMode);
@@ -114,11 +175,18 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
     try {
       const patch: Partial<MouseStatus> = {};
 
-      if (stagedDpi !== status.dpi) {
+      if (stagedDpi !== status.dpi || (hasSeparateAxes && unlinkedAxes && stagedDpiY !== status.dpiY)) {
+        // Linked (the default): Y is omitted so every driver's own
+        // `setDpi(dpi, dpiY = dpi)` default keeps both axes on this value —
+        // never the mouse's own Y, which would leave the axes unequal.
+        const dpiY = hasSeparateAxes && unlinkedAxes ? Math.round(stagedDpiY) : undefined;
         const applied = await (isLogitech
-          ? logitechSetDpi(info, Math.round(stagedDpi))
-          : setDpi(info, Math.round(stagedDpi)));
+          ? logitechSetDpi(info, Math.round(stagedDpi), dpiY)
+          : setDpi(info, Math.round(stagedDpi), dpiY));
         patch.dpi = applied;
+        // The drivers verify both axes (and throw if the mouse kept
+        // something else), so an unlinked Y is confirmed too.
+        if (hasSeparateAxes) patch.dpiY = dpiY ?? applied;
       }
       if (stagedPollingRate !== status.pollingRateHz) {
         const applied = await (isLogitech
@@ -155,6 +223,12 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
   }
 
   async function toggleAdvanced(key: (typeof ADVANCED_TOGGLES)[number]["key"], next: boolean) {
+    // `pending` gates every control in this tab (`busy`), so a toggle has to
+    // set it too: without it a second click lands while the first write is
+    // still on the wire and the generic write layer rejects it as "already
+    // busy with another request" — an error toast for a click the UI
+    // presented as available.
+    setPending(true);
     try {
       const applied = await (key === "motionSync"
         ? setMotionSync(info, next)
@@ -167,6 +241,8 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
       showToast(`${key === "motionSync" ? "Motion sync" : key === "angleSnapping" ? "Angle snapping" : key === "rippleControl" ? "Ripple control" : "Performance mode"} ${next ? "enabled" : "disabled"}.`, "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setPending(false);
     }
   }
 
@@ -178,6 +254,10 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
     promise: Promise<unknown>,
     patch: (value: unknown) => Partial<MouseStatus> | null,
   ) {
+    // See toggleAdvanced: every one of these controls starts its write
+    // eagerly from an onClick/onChange, so without `pending` the second click
+    // of a rapid pair races the first and is rejected as "busy".
+    setPending(true);
     try {
       const applied = await promise;
       const next = patch(applied);
@@ -185,6 +265,8 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
       showToast(`${label} applied.`, "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setPending(false);
     }
   }
       return (
@@ -215,10 +297,29 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
             <span class="setting-title">Sensitivity</span>
           </div>
           <div class="dpi-panel-value-group">
-            <span class={`dpi-panel-value ${stagedDpi !== status.dpi ? "dpi-panel-value--dirty" : ""}`}>
-              {stagedDpi.toLocaleString()} DPI
+            <span class={`dpi-panel-value ${stagedDpi !== status.dpi || (hasSeparateAxes && unlinkedAxes && stagedDpiY !== status.dpiY) ? "dpi-panel-value--dirty" : ""}`}>
+              {hasSeparateAxes && unlinkedAxes
+                ? `${stagedDpi.toLocaleString()} × ${stagedDpiY.toLocaleString()} DPI`
+                : `${stagedDpi.toLocaleString()} DPI`}
             </span>
             {!dpiPresets.includes(stagedDpi) && <span class="dpi-panel-badge">Custom</span>}
+            {hasSeparateAxes && (
+              <label class="dpi-panel-axis-link" title="Link X and Y sensitivity">
+                <span>Link X/Y</span>
+                <input
+                  type="checkbox"
+                  checked={!unlinkedAxes}
+                  disabled={busy}
+                  onChange={() => {
+                    const linked = unlinkedAxes;
+                    setUnlinkedAxes(!linked);
+                    // Re-linking snaps Y back onto X, so what Apply writes is
+                    // what the panel shows.
+                    if (linked) setStagedDpiY(stagedDpi);
+                  }}
+                />
+              </label>
+            )}
           </div>
         </div>
 
@@ -228,7 +329,10 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
               key={preset}
               class={`dpi-preset ${preset === stagedDpi ? "active" : ""}`}
               disabled={busy}
-              onClick={() => setStagedDpi(preset)}
+              onClick={() => {
+                setStagedDpi(preset);
+                if (!unlinkedAxes) setStagedDpiY(preset);
+              }}
             >
               {preset.toLocaleString()}
             </button>
@@ -237,7 +341,7 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
 
         <div class="dpi-axis-row">
           <label class="dpi-axis-field">
-            <span>Custom DPI ({dpiMin}–{dpiMax.toLocaleString()})</span>
+            <span>{hasSeparateAxes && unlinkedAxes ? "X axis" : "Custom DPI"} ({dpiMin}–{dpiMax.toLocaleString()})</span>
             <input
               type="number"
               min={dpiMin}
@@ -248,14 +352,39 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
               disabled={busy}
               onInput={(e) => {
                 const v = Number((e.target as HTMLInputElement).value);
-                if (Number.isFinite(v) && v > 0) setStagedDpi(v);
+                if (Number.isFinite(v) && v > 0) {
+                  setStagedDpi(v);
+                  if (!unlinkedAxes) setStagedDpiY(v);
+                }
               }}
               onKeyDown={(e) => { if (e.key === "Enter") void applyAll(); }}
             />
           </label>
+          {hasSeparateAxes && unlinkedAxes && (
+            <label class="dpi-axis-field">
+              <span>Y axis ({dpiMin}–{dpiMax.toLocaleString()})</span>
+              <input
+                type="number"
+                min={dpiMin}
+                max={dpiMax}
+                step={dpiStep}
+                placeholder={`e.g. ${dpiPresets[2]}`}
+                value={String(stagedDpiY)}
+                disabled={busy}
+                onInput={(e) => {
+                  const v = Number((e.target as HTMLInputElement).value);
+                  if (Number.isFinite(v) && v > 0) setStagedDpiY(v);
+                }}
+                onKeyDown={(e) => { if (e.key === "Enter") void applyAll(); }}
+              />
+            </label>
+          )}
         </div>
 
-        <p class="dpi-current-caption">Current {status.dpi} DPI</p>
+        <p class="dpi-current-caption">
+          Current {status.dpi} DPI
+          {hasSeparateAxes && status.dpiY != null && status.dpiY !== status.dpi ? ` (Y ${status.dpiY})` : ""}
+        </p>
       </div>
       )}
 
@@ -271,7 +400,10 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
               <button
                 key={hz}
                 class={`performance-chip ${hz === stagedPollingRate ? "active" : ""}`}
-                disabled={busy}
+                // `pollingReadOnly` is the protocol saying the rate can be read
+                // but not staged (a limited firmware generation) — the chip
+                // still shows the device's rate, it just can't be picked.
+                disabled={busy || ui?.pollingReadOnly}
                 onClick={() => setStagedPollingRate(hz)}
               >
                 {hz} Hz
@@ -307,15 +439,15 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
             </>
           )}
 
-          {status.supportedLiftOffDistances && status.supportedLiftOffDistances.length > 0 && (
+          {loftOffValues.length > 0 && (
             <>
               <span class="sensor-panel-title">Lift-off distance</span>
               <div class="segmented-group">
-                {status.supportedLiftOffDistances.map((value) => (
+                {loftOffValues.map((value) => (
                   <button
                     key={value}
                     class={value === stagedLod ? "active" : ""}
-                    disabled={busy}
+                    disabled={busy || loftOffDisabled}
                     onClick={() => setStagedLod(value)}
                   >
                     {value}
@@ -323,7 +455,9 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
                 ))}
               </div>
               <p class="sensor-panel-description">
-                Controls how far you can lift the mouse before tracking stops. Higher values keep tracking a little longer.
+                {loftOffDisabled
+                  ? "Available with a gaming surface mode selected — lift-off distance is ignored while surface tracking is off."
+                  : "Controls how far you can lift the mouse before tracking stops. Higher values keep tracking a little longer."}
               </p>
             </>
           )}
@@ -337,23 +471,38 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
             <span class="setting-title">Sleep timeout</span>
             <span class="setting-description">How long the mouse stays awake when idle before sleeping.</span>
           </div>
-          <div class="performance-chip-group">
-            {[600, 3600, 7200, 14400, 28800].map((seconds) => (
-              <button
-                key={seconds}
-                class={`performance-chip ${seconds === stagedSleep ? "active" : ""}`}
-                disabled={busy}
-                onClick={() => setStagedSleep(seconds)}
-              >
-                {seconds >= 3600 ? `${Math.round(seconds / 3600)} hr` : `${Math.round(seconds / 60)} min`}
-              </button>
-            ))}
-          </div>
+          <select
+            class="performance-select"
+            value={String(stagedSleep)}
+            disabled={busy}
+            onChange={(e) => setStagedSleep(Number((e.target as HTMLSelectElement).value))}
+          >
+            {(() => {
+              // Straight from the driver. Razer's list is fifteen one-minute
+              // steps, which as chips wrapped into five rows of buttons; a
+              // select is the same convention this panel already uses for the
+              // low-power list. The staged value is appended when the list
+              // doesn't contain it, so a mouse sitting on something else still
+              // shows the truth rather than nothing selected.
+              const steps = capabilities.sleepTimeouts ?? [];
+              const current = stagedSleep;
+              const options = current != null && !steps.includes(current)
+                ? [...steps, current].sort((a, b) => a - b)
+                : steps;
+              return options.map((seconds) => (
+                <option key={seconds} value={seconds}>
+                  {/* 0 is the "never sleep" value GearHub/MCHOSE use; the rest
+                      are seconds (see deviceCapabilities). */}
+                  {seconds === 0 ? "Never" : seconds >= 3600 ? `${Math.round(seconds / 3600)} hr` : `${Math.round(seconds / 60)} min`}
+                </option>
+              ));
+            })()}
+          </select>
         </div>
       )}
 
       {/* ── Advanced toggles ─────────────────────────────────────── */}
-      {ADVANCED_TOGGLES.map(({ key, label, description }) =>
+      {visibleToggles.map(({ key, label, description }) =>
         typeof status[key] === "boolean" ? (
           <div class="setting-row" key={key}>
             <div class="setting-label">
@@ -397,11 +546,11 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
       )}
 
       {/* ── Debounce (ATK, Pulsar, WLMouse, Wallhack, …) ─────────── */}
-      {typeof status.debounceMs === "number" && (
+      {debounceValues !== null && (
         <div class="setting-row">
           <div class="setting-label">
             <span class="setting-title">Debounce</span>
-            <span class="setting-description">Filters out physical switch bounce (0–20 ms). Higher is steadier, slightly more click lag.</span>
+            <span class="setting-description">Filters out physical switch bounce (0–{debounceValues[debounceValues.length - 1]} ms). Higher is steadier, slightly more click lag.</span>
           </div>
           <select
             class="performance-select"
@@ -413,7 +562,7 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
                 typeof v === "number" ? { debounceMs: v } : null);
             }}
           >
-            {Array.from({ length: 21 }, (_, ms) => <option key={ms} value={ms}>{ms} ms</option>)}
+            {debounceValues?.map((ms) => <option key={ms} value={ms}>{ms} ms</option>)}
           </select>
         </div>
       )}
@@ -435,7 +584,19 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
                 typeof v === "number" ? { lowBatteryWarning: v } : null);
             }}
           >
-            {[5, 10, 15, 20, 25, 30].map((pct) => <option key={pct} value={pct}>{pct}%</option>)}
+            {(() => {
+              // Straight from the driver when it says (Razer's own slider
+              // steps); the device's reported value is appended either way so
+              // a threshold outside the list — the Viper V4 Pro reports any
+              // integer 0-100 — still shows the truth instead of rendering
+              // the select with nothing selected.
+              const current = status.lowBatteryWarning;
+              const steps = capabilities.lowPowerThresholds ?? [5, 10, 15, 20, 25, 30];
+              const options = current != null && !steps.includes(current)
+                ? [...steps, current].sort((a, b) => a - b)
+                : steps;
+              return options.map((pct) => <option key={pct} value={pct}>{pct}%</option>);
+            })()}
           </select>
         </div>
       )}
@@ -490,8 +651,8 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
         <div class="apply-bar">
           <span class="apply-bar-label"><AlertTriangle size={14} class="apply-bar-icon" /> You have unsaved changes</span>
           <div class="apply-bar-actions">
-            <button class="apply-bar-revert" disabled={pending} onClick={revert}>Revert</button>
-            <button class="apply-bar-apply" disabled={pending} onClick={() => void applyAll()}>
+            <button class="apply-bar-revert" disabled={busy} onClick={revert}>Revert</button>
+            <button class="apply-bar-apply" disabled={busy} onClick={() => void applyAll()}>
               {pending ? "Applying…" : "Apply Changes"}
             </button>
           </div>
