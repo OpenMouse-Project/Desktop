@@ -17,6 +17,7 @@
 
   --success: #69d28d;
   --warning: #e8b267;
+  --danger: #ef6f6f;
   --accent: #f5975c;
   --accent-ink: #1a0e06;
 
@@ -48,6 +49,7 @@
 
   --success: #6fdc93;
   --warning: #e8c06b;
+  --danger: #e8737a;
   --accent: #58c97c;
   --accent-ink: #06140b;
 }
@@ -71,6 +73,7 @@
 
   --success: #8fda9f;
   --warning: #e3c06e;
+  --danger: #ef7d92;
   --accent: #a98bff;
   --accent-ink: #120a2c;
 }
@@ -477,7 +480,11 @@ button:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  padding: 0.75rem 0 0;
+  /* The gap to the panel below lives here rather than on each tab's own root,
+     so every tab (Overview, Performance, and whatever comes next) starts the
+     same distance from the pill bar. It used to be 0, leaving the ~4px from
+     `.performance-tab`'s margin-top as the entire spacing. */
+  padding: 0.75rem 0 1.5rem;
   position: relative;
 }
 
@@ -746,7 +753,10 @@ button:focus-visible {
 
 /* Supported-mice catalog spans the full content panel like a document. */
 .page-supported {
+  display: flex;
+  height: calc(100vh - 94px);
   max-width: none;
+  flex-direction: column;
   margin: 0;
 }
 
@@ -1488,6 +1498,212 @@ button:focus-visible {
   cursor: default;
 }
 
+/* ---------- Devices grid (Overview, before anything is connected) ---------- */
+
+/* The device list used to be rows: a 42px thumbnail beside the name, which
+   read as a settings list rather than a device picker. These are tiles with
+   the product artwork as the subject, sized by how many devices there are —
+   two fill the window between them, four sit quarter-width, anything past
+   four wraps — so the grid reads as "the devices you have" rather than
+   fixed-size tiles with dead space beside them. */
+.device-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+  align-items: stretch;
+  align-content: stretch;
+  grid-auto-rows: minmax(250px, 1fr);
+  /* A definite height, not a minimum: rows then *share* it, so the art fills
+     whatever the tiles are given instead of the art's own aspect ratio
+     deciding the row height and pushing the grid past the window. Extra rows
+     overflow into the page's scroll, which is what more devices should do. */
+  height: calc(100vh - 10rem);
+}
+
+.device-grid--1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.device-grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.device-grid--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.device-grid--4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.device-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  padding: 1rem 1.1rem;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.device-card:hover {
+  border-color: var(--line-strong);
+  background: var(--raised);
+}
+
+.device-card--connected {
+  border-color: var(--line-strong);
+}
+
+.device-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.device-card-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--bright);
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+/* Battery and capability icons on one dim line under the name — the same
+   status line the reference tiles carry. */
+.device-card-status {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--dim);
+}
+
+.device-card-status:empty {
+  display: none;
+}
+
+.device-card-battery {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.74rem;
+}
+
+.device-card-feature {
+  display: inline-flex;
+  align-items: center;
+  color: var(--dim);
+}
+
+.device-card-meta {
+  font-size: 0.7rem;
+  color: var(--faint);
+  opacity: 0.75;
+}
+
+/* The artwork is the subject: it takes every pixel the header leaves, and the
+   image is centred absolutely because DeviceTile.tsx positions it from the
+   measured art bounds (inline style). Without those (an artwork whose alpha
+   bounds could not be read) the rules below leave it plainly contained. */
+.device-card-art {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Measured mode (no clamp): the inline style from deviceArtStyle already sizes
+   the image and centres the *subject*, and the canvas' transparent margins are
+   meant to overflow — the container clips them. Clamping here would fight the
+   normalisation and leave tiles at different sizes. */
+.device-card-image {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* Fallback mode: no bounds yet (or the artwork failed to load), so the image
+   is plainly contained in the tile, which needs the clamps the measured mode
+   must not have. */
+.device-card-image--contain {
+  inset: 0;
+  left: auto;
+  top: auto;
+  margin: auto;
+  transform: none;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+/* No artwork on file for this one: keep the stand-in quiet instead of blowing
+   a 631x1000 placeholder up to the size of a real product shot. Matches on the
+   attribute, which the src property reflects — so the onError fallback gets
+   the same treatment without any extra bookkeeping. */
+.device-card-image[src*="unknown-device.png"] {
+  max-width: 132px;
+  max-height: 132px;
+}
+
+/* The whole tile is the target: one transparent button over it, which is what
+   replaced the separate Connect/View control. */
+.device-card-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: inherit;
+  cursor: pointer;
+}
+
+.device-card-hit:disabled {
+  cursor: progress;
+}
+
+.device-card-hit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Status light in the corner: steady green connected, slow pulse while
+   connecting, red after a failed attempt. An idle tile shows nothing. */
+.device-card-light {
+  position: absolute;
+  top: 1.05rem;
+  right: 1.05rem;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--dim);
+}
+
+.device-card-light--connected {
+  background: var(--success);
+}
+
+.device-card-light--connecting {
+  background: var(--success);
+  animation: device-card-pulse 1.8s ease-in-out infinite;
+}
+
+.device-card-light--error {
+  background: var(--danger);
+}
+
+@keyframes device-card-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
 .connect-error {
   margin-top: 1rem;
   color: var(--warning);
@@ -1516,49 +1732,6 @@ button:focus-visible {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
-}
-
-.device-card {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--card);
-  padding: 1.5rem;
-  margin-top: 2rem;
-}
-
-.device-card-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1.5rem;
-}
-
-.device-card-image {
-  flex-shrink: 0;
-  width: 56px;
-  height: 56px;
-  object-fit: contain;
-  border-radius: 10px;
-  background: var(--raised);
-  border: 1px solid var(--line);
-  padding: 6px;
-}
-
-.device-card-header h2 {
-  margin: 0;
-  font-size: 1.05rem;
-  color: var(--bright);
-}
-
-.device-card-brand {
-  margin: 0.1rem 0 0;
-  font-size: 0.8rem;
-  color: var(--faint);
-}
-
-.device-card-header .rescan-button {
-  margin-left: auto;
-  padding: 0.5rem;
 }
 
 .profile-override-banner {
@@ -1770,57 +1943,375 @@ button:focus-visible {
   cursor: default;
 }
 
-/* ── Supported mice page ─────────────────────────────────── */
-.supported-brands {
+/* ── Supported mice catalog ─────────────────────────────── */
+.supported-header {
   display: flex;
-  flex-direction: column;
-  margin-top: 1.25rem;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2rem;
+  margin-bottom: 1.25rem;
 }
 
-.supported-brand {
-  display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 1rem 2rem;
-  align-items: baseline;
-  padding: 0.9rem 0;
-  border: none;
-  border-top: 1px solid var(--line);
-  background: transparent;
-}
-
-.supported-brand-name {
-  font-size: 0.85rem;
+.supported-kicker {
+  display: block;
+  margin-bottom: 0.45rem;
+  color: var(--faint);
+  font-size: 0.66rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--bright);
-  margin: 0;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.supported-model-list {
-  list-style: none;
+.supported-header h1 {
   margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 0.3rem 2rem;
+  color: var(--text);
+  font-size: 1.55rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
 }
 
-.supported-model {
+.supported-header p {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.supported-search {
   display: flex;
-  flex-direction: column;
-  color: var(--dim);
-  font-size: 0.82rem;
-  line-height: 1.3;
+  align-items: center;
+  gap: 0.55rem;
+  width: 280px;
+  min-height: 38px;
+  flex: 0 0 auto;
+  padding: 0 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--muted);
 }
 
-.supported-model-name {
+.supported-search:focus-within {
+  border-color: var(--line-strong);
+  background: var(--raised);
+}
+
+.supported-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.76rem;
+}
+
+.supported-search input::placeholder {
+  color: var(--faint);
+}
+
+.supported-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.supported-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.supported-search-clear:hover {
+  background: var(--hover);
   color: var(--text);
 }
 
-.supported-model-note {
-  font-size: 0.75rem;
+.supported-browser {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.supported-brand-rail {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 0.7rem;
+  border-right: 1px solid var(--line);
+}
+
+.supported-brand-rail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.4rem 0.65rem;
+  color: var(--faint);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.supported-brand-rail-heading span:last-child {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.supported-brand-options {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.15rem;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.supported-brand-options::-webkit-scrollbar {
+  display: none;
+}
+
+.supported-brand-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.48rem 0.55rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--muted);
+  text-align: left;
+}
+
+.supported-brand-option:hover {
+  background: var(--hover);
+  color: var(--bright);
+}
+
+.supported-brand-option.active {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.supported-brand-option span:first-child {
+  overflow: hidden;
+  font-size: 0.74rem;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.supported-brand-option span:last-child {
+  color: var(--faint);
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.supported-brand-detail {
+  min-width: 0;
+  overflow-y: auto;
+  padding: 1.1rem;
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.supported-brand-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.15rem 0.1rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.supported-brand-detail-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.1rem;
+  font-weight: 620;
+  letter-spacing: -0.015em;
+}
+
+.supported-brand-detail-header p {
+  margin: 0.3rem 0 0;
+  color: var(--faint);
+  font-size: 0.7rem;
+}
+
+.supported-driver-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding-top: 0.15rem;
+  color: var(--success);
+  font-size: 0.66rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.supported-driver-status > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.supported-model-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.supported-model-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 50px;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--raised);
+}
+
+.supported-model-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.supported-model-copy h3 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--bright);
+  font-size: 0.73rem;
+  font-weight: 560;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.supported-model-copy p {
+  overflow: hidden;
+  margin: 0.2rem 0 0;
+  color: var(--faint);
+  font-size: 0.63rem;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+.supported-empty {
+  display: flex;
+  min-height: 360px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  text-align: center;
+}
+
+.supported-empty h2 {
+  margin: 0;
+  color: var(--bright);
+  font-size: 0.9rem;
+}
+
+.supported-empty p {
+  margin: 0.35rem 0 0.9rem;
+  color: var(--faint);
+  font-size: 0.72rem;
+}
+
+.supported-empty button {
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--bright);
+  font-size: 0.7rem;
+}
+
+.supported-empty button:hover {
+  background: var(--hover);
+}
+
+.supported-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .supported-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .supported-search {
+    width: 100%;
+  }
+
+  .supported-browser {
+    grid-template-columns: 160px minmax(0, 1fr);
+  }
+
+  .supported-model-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .page-supported {
+    height: auto;
+  }
+
+  .supported-browser {
+    display: block;
+    height: auto;
+    min-height: 0;
+  }
+
+  .supported-brand-rail {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .supported-brand-options {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .supported-brand-option {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .supported-brand-detail {
+    overflow: visible;
+  }
 }
 
 .toast-host {
@@ -1866,6 +2357,43 @@ button:focus-visible {
   line-height: 1.4;
   color: var(--bright);
   white-space: pre-wrap;
+}
+
+/* Text plus, for a toast reporting work in progress, its bar. */
+.toast-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.toast-body .toast-text {
+  flex: 0 0 auto;
+}
+
+.toast-progress {
+  display: block;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  overflow: hidden;
+}
+
+.toast-progress span {
+  display: block;
+  height: 100%;
+  width: 40%;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: toast-progress 1.25s ease-in-out infinite;
+}
+
+/* Indeterminate: the app cannot know how long a device will take to answer,
+   so the bar reports activity rather than a fraction. */
+@keyframes toast-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
 }
 
 .toast-dismiss {
@@ -2172,6 +2700,24 @@ body {
   border: 1px solid var(--line-strong);
   background: var(--control);
   color: var(--dim);
+}
+
+/* Link X/Y lives in the DPI header, not as its own setting row — it only
+   changes how the single DPI control above behaves. */
+.dpi-panel-axis-link {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.dpi-panel-axis-link input {
+  accent-color: var(--accent, #6d8cff);
+  cursor: pointer;
 }
 
 .dpi-preset-grid {
