@@ -4,12 +4,10 @@
 // class declares the same open/close/readStatus shape, so one loop probes
 // candidates by vendor id and the first that answers wins. Commands that
 // actually change the device are a different story — each brand's driver
-// class exposes its own set of setter methods, and until now only Logitech
-// (logitech-actions.ts) and Razer (razer-actions.ts) had UIs that needed
-// them, so everyone else was read-only.
+// class exposes its own set of setter methods, and Logitech's receiver-paired
+// HID++ indexing (logitech-actions.ts) needs its own module for that alone.
 //
-// This is the generic version of those two modules for the brands that are
-// driver-backed but had no write UI. It picks the same candidate drivers
+// This is the generic layer for every other brand. It picks the same candidate drivers
 // `connectToInterface()` does (brands.ts's candidatesForVendorId), models
 // the common setter surface they share as one type where every method is
 // optional, and drives each action the same open -> act -> close way the
@@ -22,15 +20,137 @@
 // driver here constructs on a real interface, so `open()` + one setter round
 // trip is all a write costs.
 
+import { invoke } from "@tauri-apps/api/core";
 import type { MouseLighting, MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
-import { candidatesForVendorId } from "./brands";
+import { candidatesForDevice } from "./brands";
 import { TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
-import { withHidOpenLock } from "./hid-open-lock";
+import { isQueuedNotProcessedError, withHidOpenLockRetrying } from "./hid-open-lock";
+
+/**
+ * What this device accepts for the controls whose valid values are set by the
+ * device's own protocol, asked of the driver class that actually answered it.
+ *
+ * These lists live on the driver classes (not in `MouseStatus`) and are pure —
+ * they read product ids / catalog entries, never the wire — so this needs no
+ * connection and no lock. Before this, the Performance tab hardcoded stand-in
+ * lists (10 min-8 h sleep values, 0-20 ms debounce) that any driver with a
+ * different set rejected outright: Razer takes 1-15 min of sleep, ATK 30 s-30
+ * min in its own steps, Ninjutso 1-15 min, WLMouse 30 s-30 min, and their
+ * debounce ceilings differ per protocol — every one of those writes simply
+ * failed.
+ *
+ * `driver` is `ConnectedDevice.driver`; without it the first candidate for the
+ * vendor/product is used, which is the same order `connectToInterface()` tries
+ * them in.
+ */
+export interface DeviceCapabilities {
+  /**
+   * Sleep-timeout values this device accepts, in the unit its own
+   * `setSleepTimeout` takes (seconds for every driver that exposes a list).
+   * Null when its driver exposes none — then no value the app could offer is
+   * known to be valid, so the control must not be shown.
+   */
+  sleepTimeouts: readonly number[] | null;
+  /** Low-power warning thresholds (battery %) this device accepts, or null. */
+  lowPowerThresholds: readonly number[] | null;
+  /** Highest debounce value in ms this device accepts, or null (0 means the protocol has no such control). */
+  debounceMaxMs: number | null;
+  /** Exact debounce values this device accepts, when its driver lists them rather than just a ceiling. */
+  debounceOptions: readonly number[] | null;
+  /**
+   * Highest DPI this device accepts, when its driver reports one — per
+   * *product*, not per brand (a Razer DeathAdder V3 HyperSpeed takes 30000,
+   * a Viper V3 Pro 35000). Null when the driver has no such ceiling to
+   * report, in which case the UI falls back to its own bounds.
+   */
+  dpiMax: number | null;
+}
+
+export function deviceCapabilities(info: HidInterfaceInfo): DeviceCapabilities {
+  const empty: DeviceCapabilities = {
+    sleepTimeouts: null,
+    lowPowerThresholds: null,
+    debounceMaxMs: null,
+    debounceOptions: null,
+    dpiMax: null,
+  };
+  // Whatever the walk would have chosen for this device, by the library's own
+  // rule — see brands.ts's candidatesForDevice.
+  const candidate = candidatesForDevice(info)[0];
+  if (!candidate) return empty;
+
+  // Constructing a client is side-effect free (no open, no listener — the
+  // classes only store the device and these getters read product ids and
+  // catalogs), but this runs during render against every registered driver
+  // class, so a getter that throws must read as "capability not offered"
+  // rather than take the whole device page down with it.
+  try {
+    const client = candidate.create(new TauriHidDevice(info)) as unknown as {
+      getSleepOptions?: () => readonly number[];
+      getLowPowerOptions?: () => readonly number[];
+      getDebounceMaxMs?: () => number;
+      getDebounceOptions?: () => readonly number[];
+      maxDpi?: () => number;
+    } | null;
+    if (!client) return empty;
+
+    const sleepTimeouts = client.getSleepOptions?.() ?? null;
+    const lowPowerThresholds = client.getLowPowerOptions?.() ?? null;
+    const debounceMaxMs = client.getDebounceMaxMs?.() ?? null;
+    const debounceOptions = client.getDebounceOptions?.() ?? null;
+    const dpiMax = client.maxDpi?.() ?? null;
+    return {
+      sleepTimeouts: sleepTimeouts?.length ? sleepTimeouts : null,
+      lowPowerThresholds: lowPowerThresholds?.length ? lowPowerThresholds : null,
+      debounceMaxMs: typeof debounceMaxMs === "number" && debounceMaxMs > 0 ? debounceMaxMs : null,
+      debounceOptions: debounceOptions?.length ? debounceOptions : null,
+      dpiMax: typeof dpiMax === "number" && dpiMax > 0 ? dpiMax : null,
+    };
+  } catch {
+    return empty;
+  }
+}
+
+/**
+ * DPI bounds to offer for a device, in precedence order: the device's own
+ * protocol hint (`ui.dpiStageEditor` — the exact values its setter validates
+ * against), then its driver's per-product ceiling (`maxDpi()`), then the
+ * caller's fallback. Shared by the Performance tab and the game-profile
+ * editor so both offer the same limits, and so neither keeps a per-brand
+ * guess that refuses DPI the mouse accepts.
+ */
+export function dpiBounds(
+  status: MouseStatus,
+  capabilities: DeviceCapabilities,
+  fallback: { min: number; max: number; step: number },
+): { min: number; max: number; step: number } {
+  const editor = status.ui?.dpiStageEditor;
+  return {
+    min: editor?.minDpi ?? fallback.min,
+    max: editor?.maxDpi ?? capabilities.dpiMax ?? fallback.max,
+    step: editor?.stepDpi ?? fallback.step,
+  };
+}
 
 const OPEN_TIMEOUT_MS = 10000;
 // A single write is one request/response round trip — the same generous but
 // far-short-of-a-readStatus-walk budget logitech-actions.ts uses.
 const ACTION_TIMEOUT_MS = 15000;
+// How long the write path waits for the mouse's queued command to be processed
+// before re-running the same set operation, and how many times. A wireless
+// mouse that has to wake to run the command answers the first read with the
+// unprocessed echo, so the budget is generous: six runs spaced 500 ms apart.
+const DEVICE_BUSY_RETRY_DELAY_MS = 500;
+const DEVICE_BUSY_RETRIES = 6;
+
+/** Waits before re-running a set operation whose command the mouse had queued. */
+function delay(ms: number): Promise<void> {
+  // Executor form, matching `withTimeout` below: this project's TS lib predates
+  // ES2024, so `Promise.withResolvers` does not type-check here.
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -87,6 +207,7 @@ export interface WritableClient {
   setCpiStage?(level: number, x: number, y: number): Promise<unknown>;
   setMulticlickFilter?(button: number, value: number): Promise<unknown>;
   setButtonMapping?(button: number, action: string): Promise<unknown>;
+  setToggleControl?(control: string, label: string): Promise<unknown>;
   setCustomPollingDivider?(divider: number): Promise<unknown>;
   setGlassMode?(enabled: boolean): Promise<unknown>;
   setEggLodIndex?(index: number): Promise<unknown>;
@@ -136,7 +257,14 @@ async function withClient<T>(
   label: string,
   action: (client: WritableClient) => Promise<T>,
 ): Promise<T> {
-  return withHidOpenLock(info.key, () => withClientLocked(info, label, action));
+  // `Retrying`, not plain `withHidOpenLock`: this is the click-path writer for
+  // every brand the Logitech-specific path doesn't cover (it is where the
+  // "No driver answered setDpi" modal comes from), and a click that lands
+  // while the 5 s status walk holds the device lock must wait for it and then
+  // land — logitech-actions.ts's own client has retried on that contention
+  // since it was written, so a first click on a Razer failed where the same
+  // click on a Logitech mouse succeeded.
+  return withHidOpenLockRetrying(info.key, () => withClientLocked(info, label, action));
 }
 
 async function withClientLocked<T>(
@@ -145,23 +273,48 @@ async function withClientLocked<T>(
   action: (client: WritableClient) => Promise<T>,
 ): Promise<T> {
   const attempts: string[] = [];
-  for (const candidate of candidatesForVendorId(info.vendorId, info.productId)) {
-    const device = new TauriHidDevice(info);
-    const client = new candidate.Client(device) as unknown as WritableClient;
-    try {
-      await withTimeout(client.open(), OPEN_TIMEOUT_MS, `${candidate.name}.open()`);
-      const result = await withTimeout(action(client), ACTION_TIMEOUT_MS, `${candidate.name}.${label}`);
-      await client.close().catch(() => undefined);
-      return result;
-    } catch (error) {
-      await client.close().catch(() => undefined);
-      const message = error instanceof Error ? error.message : String(error);
-      attempts.push(`${candidate.name}: ${message}`);
-    }
-  }
-  if (attempts.length === 0) {
+  const candidates = candidatesForDevice(info);
+  if (candidates.length === 0) {
     throw new Error(`This device's driver doesn't support ${label}.`);
   }
+  for (const candidate of candidates) {
+    const device = new TauriHidDevice(info, candidate.preferredCollection);
+    const client = candidate.create(device) as unknown as WritableClient | null;
+    if (!client) continue;
+    const name = client.constructor.name || candidate.brand;
+    let message = "";
+    // One delayed re-run per candidate when the mouse echoes the request back
+    // unprocessed — see DEVICE_BUSY_RETRY_DELAY_MS. Two, not one: the reply
+    // that says "queued, not processed" can arrive while the status walk's
+    // last request is still being processed on the mouse.
+    for (let attempt = 0; attempt < DEVICE_BUSY_RETRIES; attempt += 1) {
+      try {
+        await withTimeout(client.open(), OPEN_TIMEOUT_MS, `${name}.open()`);
+        const result = await withTimeout(action(client), ACTION_TIMEOUT_MS, `${name}.${label}`);
+        await client.close().catch(() => undefined);
+        if (attempt > 0) {
+          void invoke("log_line", {
+            line: `[write] ${label} on ${info.key}: ${name} answered on try ${attempt + 1} — the mouse had the command queued, not processed`,
+          }).catch(() => {});
+        }
+        return result;
+      } catch (error) {
+        await client.close().catch(() => undefined);
+        message = error instanceof Error ? error.message : String(error);
+        if (!isQueuedNotProcessedError(message)) break;
+        if (attempt < DEVICE_BUSY_RETRIES - 1) {
+          await delay(DEVICE_BUSY_RETRY_DELAY_MS);
+        }
+      }
+    }
+    attempts.push(`${name}: ${message}`);
+  }
+  // Recorded, not only shown: a failed write is what users report, and the
+  // modal text alone cannot say whether the queue retry above ran or how far
+  // each candidate got.
+  void invoke("log_line", {
+    line: `[write] ${label} on ${info.key} failed. Tried:\n  ${attempts.join("\n  ")}`,
+  }).catch(() => {});
   throw new Error(`No driver answered ${label}. Tried:\n  ${attempts.join("\n  ")}`);
 }
 
@@ -347,6 +500,21 @@ export const setButtonMapping = (info: HidInterfaceInfo, button: string | number
   withClient(info, "setButtonMapping", async (client) => {
     if (!client.setButtonMapping) throw new Error("setButtonMapping not supported");
     return client.setButtonMapping(button as never, action);
+  });
+
+/**
+ * Scroll-up / scroll-down / sensitivity-button toggles — Razer gives them
+ * their own command and deliberately keeps them out of
+ * `RAZER_BUTTON_MAPPINGS`, so sending one through `setButtonMapping` always
+ * threw ("… is not a button mapping this driver can send.") before any
+ * traffic. Their values do come back in `status.razerButtonMappings`
+ * (RazerHidClient.readButtonMappings reads them), which is why only the write
+ * side needed routing.
+ */
+export const setToggleControl = (info: HidInterfaceInfo, control: string, label: string): Promise<unknown> =>
+  withClient(info, "setToggleControl", async (client) => {
+    if (!client.setToggleControl) throw new Error("setToggleControl not supported");
+    return client.setToggleControl(control, label);
   });
 
 export const setCustomPollingDivider = (info: HidInterfaceInfo, divider: number): Promise<unknown> =>

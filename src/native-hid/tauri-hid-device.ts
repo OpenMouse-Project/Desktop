@@ -13,12 +13,13 @@
 // Node host instead of a webview, backed by node-hid instead of Tauri's
 // Rust `hidapi` commands.
 //
-// Real report-descriptor parsing isn't implemented here (the Rust side
-// doesn't parse the HID report descriptor into collections) — `collections`
-// stays empty. Callers must not rely on collections-based `isSupported()`
-// gating (most driver classes' static `isSupported()` checks `collections`
-// and will always return false against this adapter); construct the known
-// driver class directly instead — see `src/native-hid/brands.ts`.
+// `collections` is real: src-tauri/src/hid_descriptor.rs parses each
+// interface's HID report descriptor and hid.rs merges the group's collections
+// into `HidInterface.collections`, in WebHID's own shape. That matters because
+// the protocol library's drivers gate on it — their static `isSupported(device)`
+// reads `device.collections` — so `@openmouse/protocol/drivers/registry`'s own
+// `DEVICE_DRIVERS` can match devices here exactly as it does in a browser,
+// instead of the app carrying a hand-copied registry.
 //
 // One device here == every HID collection sharing a (vendor id, product
 // id) pair, opened together (see hid.rs's module docs for why this is
@@ -33,6 +34,13 @@ export interface HidInterfaceInfo {
   productId: number;
   productString: string;
   manufacturerString: string;
+  /**
+   * The interface group's HID collections and the report ids they declare,
+   * parsed from each split's report descriptor by the Rust side. WebHID's own
+   * shape, because the protocol drivers' `isSupported(device)` reads exactly
+   * this to decide whether they can drive the device.
+   */
+  collections: HIDCollectionInfo[];
 }
 
 interface HidInputReportPayload {
@@ -51,25 +59,48 @@ export async function listHidInterfaces(vendorIds: number[]): Promise<HidInterfa
   return await invoke<HidInterfaceInfo[]>("hid_list_interfaces", { vendorIds });
 }
 
+/**
+ * The HID collection a brand's driver actually talks on, when it is a
+ * *standard* one. The bridge opens every collection of a (vendor, product)
+ * pair as one group and tries them in a fixed order, which is wrong for a
+ * device whose control channel is an ordinary collection — Razer's is
+ * "the interface whose only collection is Generic Desktop Mouse" per its
+ * driver's own docs. Without this the request goes to whichever collection
+ * ranks first (the consumer-control one, on a DeathAdder V3 HyperSpeed), which
+ * accepts the write, answers an all-zero packet, and pins the route there.
+ */
+export interface PreferredCollection {
+  usagePage: number;
+  usage: number;
+}
+
 export class TauriHidDevice implements HIDDevice {
   readonly vendorId: number;
   readonly productId: number;
   readonly productName: string;
-  readonly collections: readonly HIDCollectionInfo[] = [];
+  readonly collections: readonly HIDCollectionInfo[];
   opened = false;
 
   private readonly listeners = new Set<(event: HIDInputReportEvent) => void>();
+  private readonly preferred?: PreferredCollection;
   private unlisten: UnlistenFn | null = null;
 
-  constructor(info: HidInterfaceInfo) {
+  constructor(info: HidInterfaceInfo, preferred?: PreferredCollection) {
     this.vendorId = info.vendorId;
     this.productId = info.productId;
     this.productName = info.productString;
+    this.collections = info.collections ?? [];
+    this.preferred = preferred;
   }
 
   async open(): Promise<void> {
     if (this.opened) return;
-    await invoke("hid_open", { vendorId: this.vendorId, productId: this.productId });
+    await invoke("hid_open", {
+      vendorId: this.vendorId,
+      productId: this.productId,
+      preferredUsagePage: this.preferred?.usagePage,
+      preferredUsage: this.preferred?.usage,
+    });
     this.unlisten = await listen<HidInputReportPayload>("hid-input-report", (event) => {
       if (event.payload.key !== this.key()) return;
       const bytes = Uint8Array.from(event.payload.data);

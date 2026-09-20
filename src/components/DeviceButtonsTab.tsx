@@ -1,15 +1,15 @@
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
 import {
   RAZER_BUTTON_CONTROLS,
+  RAZER_BUTTON_CONTROL_LABEL,
   RAZER_BUTTON_MAPPINGS,
   RAZER_LOCKED_BUTTON_CONTROL,
   RAZER_TOGGLE_CONTROLS,
   RAZER_TOGGLE_CONTROL_INFO,
-  type RazerButtonControl,
 } from "@openmouse/protocol/razer";
 import { EGG_BUTTON_NAMES, EGG_BUTTON_MAPPINGS } from "@openmouse/protocol/drivers/endgame/egg-op1-hid";
 import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
-import { setButtonMapping, setMulticlickFilter } from "../native-hid/write";
+import { setButtonMapping, setMulticlickFilter, setToggleControl } from "../native-hid/write";
 import { showToast } from "../lib/toast";
 
 interface Props {
@@ -35,13 +35,6 @@ async function writeToast(
   }
 }
 
-const RAZER_BUTTON_LABEL: Record<RazerButtonControl, string> = {
-  leftClick: "Left Click",
-  rightClick: "Right Click",
-  mouse4: "Mouse Button 4",
-  mouse5: "Mouse Button 5",
-};
-
 export function DeviceButtonsTab({ info, status, brand, onApplied, readOnly }: Props) {
   const disabled = readOnly ?? false;
   const isRazer = brand === "Razer" && Boolean(status.razerButtonMappings);
@@ -66,7 +59,7 @@ export function DeviceButtonsTab({ info, status, brand, onApplied, readOnly }: P
             return (
               <div class="setting-row" key={control}>
                 <div class="setting-label">
-                  <span class="setting-title">{RAZER_BUTTON_LABEL[control]}</span>
+                  <span class="setting-title">{RAZER_BUTTON_CONTROL_LABEL[control]}</span>
                   <span class="setting-description">Choose what this button sends.</span>
                 </div>
                 <select
@@ -76,7 +69,7 @@ export function DeviceButtonsTab({ info, status, brand, onApplied, readOnly }: P
                   onChange={(e) => {
                     const mapping = (e.target as HTMLSelectElement).value as (typeof RAZER_BUTTON_MAPPINGS)[number];
                     void writeToast(
-                      mapping === "Disabled" ? "Disabled button" : `Rebound ${RAZER_BUTTON_LABEL[control]}`,
+                      mapping === "Disabled" ? "Disabled button" : `Rebound ${RAZER_BUTTON_CONTROL_LABEL[control]}`,
                       setButtonMapping(info, control, mapping),
                       onApplied,
                       () => ({ razerButtonMappings: { ...status.razerButtonMappings, [control]: mapping } }),
@@ -115,7 +108,7 @@ export function DeviceButtonsTab({ info, status, brand, onApplied, readOnly }: P
                     const v = (e.target as HTMLInputElement).value.trim();
                     void writeToast(
                       infoRow.label,
-                      setButtonMapping(info, control, v === "" ? "Disabled" : v),
+                      setToggleControl(info, control, v === "" ? "Disabled" : v),
                       onApplied,
                       () => ({ razerButtonMappings: { ...status.razerButtonMappings, [control]: v === "" ? "Disabled" : v } }),
                     );

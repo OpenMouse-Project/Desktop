@@ -8,6 +8,7 @@ mod conflicting_apps;
 mod discord_rpc;
 mod games;
 mod hid;
+mod hid_descriptor;
 mod linux_permissions;
 mod resource_monitor;
 mod stream_overlay;
@@ -153,6 +154,15 @@ pub fn run() {
             stream_overlay::stream_overlay_set_device_status,
         ])
         .setup(|app| {
+            // Diagnostics must outlive the process: stderr goes to whatever
+            // terminal launched the app (nothing at all for a packaged build)
+            // and the in-memory ring buffer dies with it, which is how a
+            // reported "clicked Apply and it errored" ended up with nothing
+            // left to read. Best-effort — see applog::init_file_logging.
+            if let Ok(log_dir) = app.path().app_log_dir() {
+                applog::init_file_logging(&log_dir);
+            }
+
             tray::build(app, on_tray_menu, on_tray_icon_event)?;
 
             if let Some(window) = app.get_webview_window("main") {
@@ -201,6 +211,27 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // macOS: bring the window back when the app is re-opened — a Dock
+            // click, `open -a`, or anything else that reaches
+            // `applicationShouldHandleReopen:` (tao implements it and emits
+            // this event, so it does fire here). This app hides its window to
+            // the tray on close by design (see `on_window_event` above), which
+            // means that click is the normal way back for anyone who has
+            // closed the window — and without this it did nothing at all,
+            // leaving only the tray's own "Show OpenMouse" menu item (or a
+            // relaunch) to get the window back.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+                if !has_visible_windows {
+                    show_main_window(app);
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = (app, event);
+            }
+        });
 }

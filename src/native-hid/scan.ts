@@ -16,7 +16,7 @@
 // apply.mjs uses.
 
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
-import { allKnownVendorIds, candidatesForVendorId } from "./brands";
+import { allKnownVendorIds, candidatesForDevice } from "./brands";
 import { listHidInterfaces, TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
 import { withHidOpenLock } from "./hid-open-lock";
 
@@ -68,6 +68,15 @@ export interface ConnectedDevice {
   key: string;
   brand: string;
   status: MouseStatus;
+  /**
+   * `driver` of the class that actually answered, so
+   * capability questions — the sleep / low-power / debounce option lists only
+   * the driver class knows — can be put to the class whose validation this
+   * exact device obeys. Razer alone registers five candidate classes for one
+   * vendor id and its Viper V4 Pro overrides the generic sleep list with a
+   * subset, so asking the wrong class offers values the mouse rejects.
+   */
+  driver: string;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -89,7 +98,7 @@ export async function listCandidateInterfaces(): Promise<CandidateInterface[]> {
   return interfaces
     .map((info) => ({
       info,
-      brands: [...new Set(candidatesForVendorId(info.vendorId, info.productId).map((candidate) => candidate.brand))],
+      brands: [...new Set(candidatesForDevice(info).map((candidate) => candidate.brand))],
     }))
     .filter((candidate) => candidate.brands.length > 0);
 }
@@ -114,18 +123,24 @@ export async function connectToInterface(info: HidInterfaceInfo): Promise<Connec
 
 async function connectToInterfaceLocked(info: HidInterfaceInfo): Promise<ConnectedDevice> {
   const attempts: string[] = [];
-  for (const candidate of candidatesForVendorId(info.vendorId, info.productId)) {
-    const device = new TauriHidDevice(info);
-    const client = new candidate.Client(device);
+  const candidates = candidatesForDevice(info);
+  if (candidates.length === 0) {
+    throw new Error("No driver claims this interface.");
+  }
+  for (const candidate of candidates) {
+    const device = new TauriHidDevice(info, candidate.preferredCollection);
+    const client = candidate.create(device);
+    if (!client) continue;
+    const name = client.constructor.name || candidate.brand;
     try {
-      await withTimeout(client.open(), OPEN_TIMEOUT_MS, `${candidate.name}.open()`);
-      const status = await withTimeout(client.readStatus(), READ_STATUS_TIMEOUT_MS, `${candidate.name}.readStatus()`);
+      await withTimeout(client.open(), OPEN_TIMEOUT_MS, `${name}.open()`);
+      const status = await withTimeout(client.readStatus(), READ_STATUS_TIMEOUT_MS, `${name}.readStatus()`);
       await client.close().catch(() => undefined);
-      return { key: info.key, brand: candidate.brand, status };
+      return { key: info.key, brand: candidate.brand, status, driver: name };
     } catch (error) {
       await client.close().catch(() => undefined);
       const message = error instanceof Error ? error.message : String(error);
-      attempts.push(`${candidate.name}: ${message}`);
+      attempts.push(`${name}: ${message}`);
     }
   }
   throw new Error(`No driver answered on this interface. Tried:\n  ${attempts.join("\n  ")}`);

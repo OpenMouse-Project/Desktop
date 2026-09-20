@@ -1,208 +1,150 @@
-// Maps a HID vendor id to the candidate `@openmouse/protocol` driver
-// classes to try constructing against each interface found there. Ported
-// from OpenMouse-Bridge's `native-hid/src/brands.mjs`, which does the same
-// job for a Node host — see that file's comments for how this list tracks
-// mouse-protocol/src/drivers/registry.ts's own DEVICE_DRIVERS order.
+// Which drivers can drive a device, and which collection they talk on, come
+// from `@openmouse/protocol` itself — its `DEVICE_DRIVERS` registry
+// (brand, supports, create, score) and its `SUPPORTED_HID_FILTERS`.
 //
-// Unlike Bridge, this list includes Pulsar: Bridge deliberately excludes it
-// because Bridge has a separate dependency-free native Rust driver for it
-// and wants to avoid spawning Node for something Rust already handles.
-// openmouse-desktop has no such Rust driver (yet) and reuses the driver
-// classes for every brand uniformly through `TauriHidDevice`, so Pulsar
-// belongs here too.
-//
-// `isSupported()` on every one of these classes gates on `device.collections`,
-// which `TauriHidDevice` cannot populate (see its module docs) — so brands
-// are matched here by vendor id, and every candidate class for that vendor
-// id is tried in turn (`open()` + `readStatus()`) rather than trusting
-// `isSupported()`. See `probeInterface()` in `src/native-hid/scan.ts`.
+// This file used to carry a hand-maintained copy of all of that: 35 driver
+// imports, brand names, candidate order, product-id exclusions, and a guessed
+// Razer control collection. It had to, because the registry matches devices
+// with `isSupported(device)`, which reads `device.collections` — and the Tauri
+// transport could not supply collections (see tauri-hid-device.ts's own docs
+// saying so). That gap is closed: src-tauri/src/hid_descriptor.rs parses each
+// interface's report descriptor and the collections reach the device object, so
+// the library's registry is authoritative here. A brand or protocol added
+// upstream now arrives in this app with no change at all.
 
-import { AtkHidClient } from "@openmouse/protocol/drivers/atk/hid";
-import { AttackSharkHidClient } from "@openmouse/protocol/drivers/attackshark/hid";
-import { EggOp1HidClient } from "@openmouse/protocol/drivers/endgame/egg-op1-hid";
-import { EggWeHidClient } from "@openmouse/protocol/drivers/endgame/egg-we-hid";
-import { FantechHidClient } from "@openmouse/protocol/drivers/fantech/hid";
-import { GearHubHidClient } from "@openmouse/protocol/drivers/gearhub/hid";
-import { FinalmouseHidClient } from "@openmouse/protocol/drivers/finalmouse/hid";
-import { GWolvesHidClient } from "@openmouse/protocol/drivers/gwolves/hid";
-import { HyperXHidClient } from "@openmouse/protocol/drivers/hyperx/hid";
-import { KeychronM6HidClient } from "@openmouse/protocol/drivers/keychron/m6-hid";
-import { KeychronNapeHidClient } from "@openmouse/protocol/drivers/keychron/nape-hid";
-import { LamzuHidClient } from "@openmouse/protocol/drivers/lamzu/hid";
-import { LogitechHidppClient } from "@openmouse/protocol/drivers/logitech/hidpp";
-import { ModdoHidClient } from "@openmouse/protocol/drivers/moddo/hid";
-import { MicrosoftHidClient } from "@openmouse/protocol/drivers/microsoft/hid";
-import { MICROSOFT_PRODUCTS } from "@openmouse/protocol/microsoft";
-import { NinjutsoHidClient } from "@openmouse/protocol/drivers/ninjutso/hid";
-import { OrbitalHidClient } from "@openmouse/protocol/drivers/orbital/hid";
-import { PulsarHidClient } from "@openmouse/protocol/drivers/pulsar/pulsar-hid";
-import { PulsarProHidClient } from "@openmouse/protocol/drivers/pulsar/pulsar-pro-hid";
-import { PulsarXs1HidClient } from "@openmouse/protocol/drivers/pulsar/pulsar-xs1-hid";
-import { RazerCobraHidClient } from "@openmouse/protocol/drivers/razer/cobra-hid";
-import { RazerHidClient } from "@openmouse/protocol/drivers/razer/hid";
-import { RazerViperHidClient } from "@openmouse/protocol/drivers/razer/viper-hid";
-import { RazerViperMiniHidClient } from "@openmouse/protocol/drivers/razer/viper-mini-hid";
-import { RazerViperV4ProHidClient } from "@openmouse/protocol/drivers/razer/viper-v4-pro-hid";
-import { TeevolutionHidClient } from "@openmouse/protocol/drivers/teevolution/hid";
-import { VgnF2HidClient } from "@openmouse/protocol/drivers/vgn/hid";
-import { WallhackKeyboardHidClient } from "@openmouse/protocol/drivers/wallhack/keyboard-hid";
-import { WallhackMouseHidClient } from "@openmouse/protocol/drivers/wallhack/mouse-hid";
-import { WLMouseHidClient } from "@openmouse/protocol/drivers/wlmouse/hid";
-import { WootingHidClient } from "@openmouse/protocol/drivers/wooting/hid";
-import { ZaunkoenigHidClient } from "@openmouse/protocol/drivers/zaunkoenig/hid";
+import { DEVICE_DRIVERS } from "@openmouse/protocol/drivers/registry";
+import { SUPPORTED_HID_FILTERS, VENDOR_ID } from "@openmouse/protocol/drivers/vendors";
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
+import { TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
 
-/** The shared shape every driver class above implements. */
+/** The shared shape the library's driver classes implement. */
 export interface SupportedClient {
   open(onReport?: (report: unknown) => void): Promise<void>;
   close(): Promise<void>;
   readStatus(): Promise<MouseStatus>;
 }
 
-export interface DriverCandidate {
-  name: string;
-  Client: new (device: HIDDevice) => SupportedClient;
-  /**
-   * Product ids this candidate must NOT be tried against, even though its
-   * vendor id matches. `isSupported()` on every one of these classes mixes
-   * collection-based checks (which TauriHidDevice can never satisfy — see
-   * this file's own docs) with plain property checks like this one, which
-   * have nothing to do with collections and are worth keeping. Skipping
-   * `isSupported()` entirely threw this away too — e.g. EggWeHidClient's
-   * own isSupported() correctly excludes Endgame Gear's OP1-8K product ids
-   * (they speak EggOp1HidClient's protocol instead), but bypassing it let
-   * EggWeHidClient claim and misidentify an OP1-8K mouse as "OP1we" when
-   * EggOp1HidClient's own exchange failed for an unrelated reason. This
-   * list is that same exclusion, reproduced by hand since the source sets
-   * aren't exported.
-   */
-  excludeProductIds?: number[];
-  includeProductIds?: number[];
-}
-
-export interface BrandEntry {
+export interface BrandedCandidate {
+  /** The brand the registry attributes this driver to. */
   brand: string;
-  vendorIds: number[];
-  candidates: DriverCandidate[];
+  /** Builds the driver for a device — the registry's own `create`. */
+  create: (device: HIDDevice) => SupportedClient | null;
+  /** The registry's confidence that this driver fits, highest wins. */
+  score: (device: HIDDevice) => number;
+  /** Whether this driver claims the device: reads `device.collections`. */
+  supports: (device: HIDDevice) => boolean;
+  /** The collection the library declares for this device, if it declares one. */
+  preferredCollection?: { usagePage: number; usage: number };
 }
 
-// Cast through `unknown`: a few driver classes (e.g. LogitechHidppClient)
-// mark `open()` private in their own .d.ts since nothing inside
-// mouse-protocol calls it externally, but every class here does implement
-// it — apply.mjs (plain JS, no compile-time privacy) already calls it this
-// same way at runtime. The cast just tells TS to trust that, once, here.
-const client = (
-  name: string,
-  Client: new (device: HIDDevice) => unknown,
-  excludeProductIds?: number[],
-  includeProductIds?: number[],
-): DriverCandidate => ({
-  name,
-  Client: Client as new (device: HIDDevice) => SupportedClient,
-  excludeProductIds,
-  includeProductIds,
-});
-
-export const BRAND_DRIVERS: BrandEntry[] = [
-  { brand: "Zaunkoenig", vendorIds: [0x0483], candidates: [client("ZaunkoenigHidClient", ZaunkoenigHidClient)] },
-  { brand: "Finalmouse", vendorIds: [0x361d], candidates: [client("FinalmouseHidClient", FinalmouseHidClient)] },
-  // EggWeHidClient (OP1we / wireless) is missing from OpenMouse-Bridge's own
-  // brands.mjs — its module only exposes `pickDevices`/`fromAuthorizedDevices`
-  // helpers for merging several browser-side HIDDevice objects into one
-  // logical mouse, which read as WebHID-only at a glance, but the
-  // constructor itself just takes a single `HIDDevice` like every other
-  // driver here — those helpers are unneeded (not incompatible) with
-  // TauriHidDevice, which already merges every split of one interface
-  // group into one synthetic device. So it belongs here.
-  { brand: "Endgame Gear", vendorIds: [0x3367], candidates: [
-    client("EggOp1HidClient", EggOp1HidClient),
-    // Excludes the OP1-8K product ids EggWeHidClient's own isSupported()
-    // also excludes (mouse-protocol/src/drivers/endgame/egg-we-hid.ts,
-    // EGG_8K_PRODUCT_IDS) — without this, an OP1-8K mouse that
-    // EggOp1HidClient fails to read gets misclaimed and misidentified as
-    // an "OP1we" by EggWeHidClient instead of correctly reporting no
-    // driver answered.
-    client("EggWeHidClient", EggWeHidClient, [0x1964, 0x1966, 0x1976, 0x1978, 0x1980]),
-  ] },
-  // Real Pulsar-vendor (0x3710) mice, including the Pulsar 4K Wireless
-  // Receiver (shared vendor id 0x3554 with Teevolution/VGN — see
-  // pulsar-hid.ts's own vendor-id branching for how it tells those apart).
-  { brand: "Pulsar", vendorIds: [0x3710, 0x3554], candidates: [
-    client("PulsarXs1HidClient", PulsarXs1HidClient),
-    client("PulsarProHidClient", PulsarProHidClient),
-    client("PulsarHidClient", PulsarHidClient),
-  ] },
-  { brand: "Teevolution", vendorIds: [0x3554], candidates: [client("TeevolutionHidClient", TeevolutionHidClient)] },
-  { brand: "VGN", vendorIds: [0x3554], candidates: [client("VgnF2HidClient", VgnF2HidClient)] },
-  { brand: "Logitech", vendorIds: [0x046d], candidates: [client("LogitechHidppClient", LogitechHidppClient)] },
-  { brand: "WLMouse", vendorIds: [0x36a7], candidates: [client("WLMouseHidClient", WLMouseHidClient)] },
-  { brand: "Lamzu", vendorIds: [0x373e], candidates: [client("LamzuHidClient", LamzuHidClient)] },
-  // Same CompX ODM hardware/class as Lamzu; readStatus() reports the brand
-  // that matches the product id.
-  { brand: "CRDRAKO", vendorIds: [0x373e], candidates: [client("LamzuHidClient", LamzuHidClient)] },
-  { brand: "moddoMOUSE", vendorIds: [0x2fe3], candidates: [client("ModdoHidClient", ModdoHidClient)] },
-  { brand: "Microsoft", vendorIds: [0x045e], candidates: [client("MicrosoftHidClient", MicrosoftHidClient, undefined, [...MICROSOFT_PRODUCTS])] },
-  // NINJUTSO_VENDOR_ID (current) and NINJUTSO_LEGACY_VENDOR_ID (shared with
-  // Orbital) — see mouse-protocol/src/ninjutso/index.ts.
-  { brand: "Ninjutso", vendorIds: [0x093a, 0x1915], candidates: [client("NinjutsoHidClient", NinjutsoHidClient)] },
-  { brand: "Orbital", vendorIds: [0x1915], candidates: [client("OrbitalHidClient", OrbitalHidClient)] },
-  // Razer mice communicate via feature reports on the Generic Desktop Mouse
-  // collection (page 0x01, usage 0x02). Non-exclusive open (set at HidApi
-  // init) prevents the cursor-freeze that exclusive mode caused.
-  { brand: "Razer", vendorIds: [0x1532], candidates: [
-    client("RazerHidClient", RazerHidClient, [0x008a]),
-    client("RazerCobraHidClient", RazerCobraHidClient),
-    client("RazerViperMiniHidClient", RazerViperMiniHidClient),
-    client("RazerViperHidClient", RazerViperHidClient),
-    client("RazerViperV4ProHidClient", RazerViperV4ProHidClient),
-  ] },
-  { brand: "ATK", vendorIds: [0x373b], candidates: [client("AtkHidClient", AtkHidClient)] },
-  { brand: "Attack Shark", vendorIds: [0x1d57, 0x25a7, 0x373e], candidates: [client("AttackSharkHidClient", AttackSharkHidClient)] },
-  { brand: "Keychron", vendorIds: [0x3434], candidates: [
-    client("KeychronM6HidClient", KeychronM6HidClient),
-    client("KeychronNapeHidClient", KeychronNapeHidClient),
-  ] },
-  // 0x3151 is the MicLink/mlzn ODM vendor id, shared by Lingbao and Fantech.
-  // GearHub goes first: the M5 Pro needs a 2.4G relay handshake and a checksum
-  // FantechHidClient does not implement, and probeInterface() falls through to
-  // Fantech when GearHubHidClient.readStatus() rejects.
-  { brand: "Lingbao", vendorIds: [0x3151], candidates: [
-    client("GearHubHidClient", GearHubHidClient),
-    client("FantechHidClient", FantechHidClient),
-  ] },
-  { brand: "Wooting", vendorIds: [0x31e3], candidates: [client("WootingHidClient", WootingHidClient)] },
-  { brand: "WALLHACK", vendorIds: [0x3879, 0x1caa], candidates: [
-    client("WallhackMouseHidClient", WallhackMouseHidClient),
-    client("WallhackKeyboardHidClient", WallhackKeyboardHidClient),
-  ] },
-  // Protocol registry uses VID 0x33e4 for GWolves (HTX Ultra 0x5618 wired /
-  // 0x3854 wireless). The earlier 0x3603 never matched anything in the
-  // protocol, so GWolves mice were silently undetected.
-  { brand: "G-Wolves", vendorIds: [0x33e4], candidates: [client("GWolvesHidClient", GWolvesHidClient)] },
-  // HyperX Pulsefire Haste: Kingston-era (0x0951) and HP-era (0x03f0) wired /
-  // wireless dongle transports share one vendor-config protocol.
-  { brand: "HyperX", vendorIds: [0x0951, 0x03f0], candidates: [client("HyperXHidClient", HyperXHidClient)] },
-];
-
-/** Every vendor id any known brand cares about, for a single HID scan. */
+/** Every vendor id the protocol library knows about, for a single HID scan. */
 export function allKnownVendorIds(): number[] {
-  return [...new Set(BRAND_DRIVERS.flatMap((entry) => entry.vendorIds))];
-}
-
-/** A driver candidate paired with the brand entry it came from. */
-export interface BrandedCandidate extends DriverCandidate {
-  brand: string;
+  return [
+    ...new Set(
+      SUPPORTED_HID_FILTERS.flatMap((filter) => (filter.vendorId === undefined ? [] : [filter.vendorId])),
+    ),
+  ];
 }
 
 /**
- * Every candidate whose vendor id list includes `vendorId`, in registry
- * order, excluding any candidate that has explicitly ruled out this
- * `productId` (see `DriverCandidate.excludeProductIds`).
+ * The collection a device's driver talks on, when the library declares one.
+ *
+ * A request *filter* that names a usage is exactly that declaration — the
+ * library narrows those devices because it knows which collection the driver
+ * uses (Logitech's HID++ interfaces on usage page 0xFF00, the Razer Viper V3's
+ * Generic Desktop Mouse collection, and so on). A filter with no usage says the
+ * opposite: "which interface carries the control channel has not been
+ * established, offer each one and let the driver reject what cannot answer" —
+ * and the transport does exactly that, fanned over every interface.
+ *
+ * Do not broaden this to the vendor's *other* entries. It looks tempting (seven
+ * Razer filters name 0x01/0x02, and a DeathAdder V3 HyperSpeed's own filter is
+ * bare), but MEASURED on that hardware: the interface which answers Razer's
+ * commands is the composite one, not the single-collection Generic Desktop
+ * Mouse interface those filters name — a request written to the latter came
+ * back as a stale queued report and never as an answer. Ranking it first would
+ * cost the connection that works.
+ */
+function preferredCollectionFor(
+  vendorId: number,
+  productId: number,
+): { usagePage: number; usage: number } | undefined {
+  const exact = SUPPORTED_HID_FILTERS.find(
+    (filter) => filter.vendorId === vendorId && filter.productId === productId,
+  );
+  const brandWide = SUPPORTED_HID_FILTERS.find(
+    (filter) => filter.vendorId === vendorId && filter.productId === undefined,
+  );
+  for (const filter of [exact, brandWide]) {
+    if (filter?.usagePage !== undefined && filter.usage !== undefined) {
+      return { usagePage: filter.usagePage, usage: filter.usage };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Every driver the library offers, in registry order, with the collection
+ * preference its filters declare for this device. Callers keep the drivers that
+ * `supports(device)` claims and order them by `score(device)` — the same
+ * decision the library makes in a browser, which is why no brand list lives
+ * here any more.
+ *
+ * `create` is cast through `unknown`: a few driver classes (LogitechHidppClient,
+ * for one) mark `open()` private in their own `.d.ts` since nothing inside
+ * mouse-protocol calls it externally, but every class does implement it —
+ * OpenMouse-Bridge's `native-hid/src/hid-device-adapter.mjs` already calls it
+ * this way at runtime, from plain JS where compile-time privacy does not exist.
+ * The cast tells TS to trust that, once, here.
  */
 export function candidatesForVendorId(vendorId: number, productId: number): BrandedCandidate[] {
-  return BRAND_DRIVERS
-    .filter((entry) => entry.vendorIds.includes(vendorId))
-    .flatMap((entry) => entry.candidates.map((candidate) => ({ ...candidate, brand: entry.brand })))
-    .filter((candidate) => !candidate.excludeProductIds?.includes(productId))
-    .filter((candidate) => candidate.includeProductIds === undefined || candidate.includeProductIds.includes(productId));
+  const preferredCollection = preferredCollectionFor(vendorId, productId);
+  return DEVICE_DRIVERS.map((driver) => ({
+    brand: driver.brand,
+    create: driver.create as unknown as (device: HIDDevice) => SupportedClient | null,
+    score: driver.score,
+    supports: driver.supports,
+    preferredCollection,
+  }));
+}
+
+/**
+ * The drivers to try for one interface, best first.
+ *
+ * The library decides: `supports(device)` — which reads `device.collections` —
+ * then `score(device)`. Where nothing claims the device, eligibility falls back
+ * to the *vendor*, because on this host the collections are not always
+ * available (hidapi cannot read a report descriptor on macOS, see
+ * hid_descriptor.rs) and every one of those predicates needs them. The vendor
+ * gate is derived from the library on both sides — `VENDOR_ID`'s keys matched
+ * against the registry's brand names, normalised, since the library spells them
+ * "Endgame Gear" there and `endgameGear` here.
+ *
+ * Trying every driver instead is not a safe fallback: CONFIRMED against real
+ * hardware, where the Logitech stopped answering after all forty drivers had
+ * been given a turn opening it.
+ */
+export function candidatesForDevice(info: HidInterfaceInfo): BrandedCandidate[] {
+  const all = candidatesForVendorId(info.vendorId, info.productId);
+  // A driver whose predicate throws is one that cannot drive this device.
+  const probe = new TauriHidDevice(info, all[0]?.preferredCollection);
+  const claimed = all.filter((candidate) => {
+    try {
+      return candidate.supports(probe);
+    } catch {
+      return false;
+    }
+  });
+  const eligible = claimed.length > 0
+    ? claimed
+    : all.filter((candidate) => brandServesVendor(candidate.brand, info.vendorId));
+  return eligible.slice().sort((a, b) => b.score(probe) - a.score(probe));
+}
+
+/** Registry brand name → the vendor ids `VENDOR_ID` lists for that brand. */
+function brandServesVendor(brand: string, vendorId: number): boolean {
+  const normalise = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return Object.entries(VENDOR_ID).some(
+    ([key, id]) => normalise(key) === normalise(brand) && id === vendorId,
+  );
 }

@@ -24,9 +24,18 @@ export function isHidOpenLocked(key: string): boolean {
   return openKeys.has(key);
 }
 
-/** True for the specific error `withHidOpenLock` throws when already locked. */
+/**
+ * True for the specific error `withHidOpenLock` throws when already locked,
+ * and for the same message arriving from Rust: `invoke` rejects with the
+ * command's error value, which is a plain string, not an Error — hid.rs's
+ * `with_hid_api` refuses a re-entrant enumeration (hidapi's macOS enumerator
+ * pumps the main run loop, so the webview's next invoke lands inside an
+ * in-flight `hid_open`) with this exact message. Both mean the same thing to
+ * every caller here.
+ */
 export function isHidBusyError(error: unknown): boolean {
-  return error instanceof Error && error.message === BUSY_MESSAGE;
+  if (error instanceof Error) return error.message === BUSY_MESSAGE;
+  return error === BUSY_MESSAGE;
 }
 
 /**
@@ -82,4 +91,26 @@ export async function withHidOpenLockRetrying<T>(
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
   }
+}
+
+/**
+ * True when the device answered a command with "queued, not processed": the
+ * request echoed back before the mouse ran it. Razer-specific wording
+ * (`returned status 0x00` — RAZER_STATUS has no 0x00 at all; `ok` is 0x02,
+ * `busy` 0x01, `timeout` 0x04), so it means "received, not done yet" rather
+ * than a refusal, and the *same idempotent* operation is safe to repeat after
+ * a short wait. CONFIRMED as what a wireless DeathAdder does on both paths
+ * here: `setDpi` reporting `Class 0x04 command 0x05 returned status 0x00` and
+ * then applying cleanly on a retry, and the status walk failing `Class 0x00
+ * command 0x81` for every candidate until the mouse answered — the driver
+ * reads a setter's reply exactly once and refuses to re-send it (hid.js's
+ * awaitReply), which is right, so retrying the whole call is the caller's job.
+ *
+ * Both shapes are accepted because the message reaches either as an Error
+ * (thrown by a driver) or as a plain string (`invoke` rejecting with a
+ * command's error value).
+ */
+export function isQueuedNotProcessedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  return message.includes("returned status 0x00");
 }

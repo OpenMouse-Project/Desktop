@@ -2537,6 +2537,7 @@ dependencies = [
  "anyhow",
  "discord-rich-presence",
  "hidapi",
+ "parking_lot",
  "serde",
  "serde_json",
  "sysinfo",
