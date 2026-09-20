@@ -15,9 +15,17 @@
 use std::sync::Mutex;
 
 use serde::Deserialize;
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::{App, AppHandle, Manager, Wry};
+
+/// A monochrome silhouette (black ink, transparent elsewhere) derived from
+/// the OpenMouse mark, distinct from the full-color Dock/window icon. macOS
+/// recolors a "template" image itself for light/dark menu bars, which a
+/// flat-color icon can't do — the app's default window icon rendered as a
+/// dark, hard-to-spot blob against a dark menu bar before this existed.
+const TRAY_ICON_BYTES: &[u8] = include_bytes!("../icons/tray-icon@2x.png");
 
 /// Text shown while nothing is connected, and the tooltip's base.
 const NO_DEVICE: &str = "No device connected";
@@ -73,8 +81,14 @@ pub fn build(
         ],
     )?;
 
+    let tray_icon = Image::from_bytes(TRAY_ICON_BYTES)
+        .unwrap_or_else(|_| app.default_window_icon().unwrap().clone());
     let icon = TrayIconBuilder::new()
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(tray_icon)
+        // macOS-only; ignored elsewhere. Tells the system this is a
+        // monochrome glyph it should recolor for the current menu bar
+        // appearance, rather than a flat icon to draw as-is.
+        .icon_as_template(true)
         .tooltip(APP_NAME)
         .menu(&menu)
         .show_menu_on_left_click(false)

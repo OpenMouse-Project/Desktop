@@ -68,6 +68,23 @@ fn show_main_window(app: &AppHandle) {
     if let Err(e) = window.unminimize() {
         applog!("[tray] unminimize() failed: {e}");
     }
+    // The window's position is whatever the OS/window manager last persisted
+    // it at, which can land outside every currently-connected display — an
+    // external monitor unplugged since the last run, a saved position from a
+    // larger screen. `show()`/`set_focus()` alone don't fix that: the window
+    // "shows," but nowhere the user can see, which looks identical to it not
+    // opening at all. Re-center on the primary monitor whenever the window's
+    // current position isn't actually on any monitor.
+    match window.current_monitor() {
+        Ok(None) => {
+            applog!("[tray] window position is off every monitor, re-centering");
+            if let Err(e) = window.center() {
+                applog!("[tray] center() failed: {e}");
+            }
+        }
+        Err(e) => applog!("[tray] current_monitor() failed: {e}"),
+        Ok(Some(_)) => {}
+    }
     if let Err(e) = window.show() {
         applog!("[tray] show() failed: {e}");
     }
