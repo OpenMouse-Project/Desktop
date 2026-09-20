@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use tauri::State;
@@ -31,7 +31,7 @@ impl Default for DiscordRpcState {
 #[tauri::command]
 pub fn enable(state: State<DiscordRpcState>) -> Result<(), String> {
     applog!("[discord] enable requested");
-    let mut rpc = state.client.lock().map_err(|error| error.to_string())?;
+    let mut rpc = state.client.lock();
     if rpc.is_some() {
         applog!("[discord] already connected");
         return Ok(());
@@ -74,7 +74,7 @@ pub fn update_activity(
     state_text: String,
 ) -> Result<(), String> {
     applog!("[discord] activity update requested: details={details:?}, state={state_text:?}");
-    let mut rpc = state.client.lock().map_err(|error| error.to_string())?;
+    let mut rpc = state.client.lock();
     let Some(client) = rpc.as_mut() else {
         applog!("[discord] activity update skipped: RPC is not enabled");
         return Err("Discord RPC is not enabled".to_string());
@@ -95,7 +95,7 @@ pub fn update_activity(
 #[tauri::command]
 pub fn disable(state: State<DiscordRpcState>) -> Result<(), String> {
     applog!("[discord] disable requested");
-    let mut rpc = state.client.lock().map_err(|error| error.to_string())?;
+    let mut rpc = state.client.lock();
     if let Some(mut client) = rpc.take() {
         if let Err(error) = client.close() {
             applog!("[discord] disconnect failed: {error}");

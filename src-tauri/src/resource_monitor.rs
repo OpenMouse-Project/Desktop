@@ -11,8 +11,7 @@
 //! provides that time gap. History, min/max, and the graph itself all live
 //! on the frontend — this only ever answers "right now."
 
-use std::sync::Mutex;
-
+use parking_lot::Mutex;
 use serde::Serialize;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
@@ -38,7 +37,7 @@ pub struct ResourceSample {
 #[tauri::command]
 pub fn sample_resource_usage(state: tauri::State<'_, ResourceMonitorState>) -> Option<ResourceSample> {
     let pid = Pid::from_u32(std::process::id());
-    let mut system = state.0.lock().unwrap();
+    let mut system = state.0.lock();
     system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
     let process = system.process(pid)?;
 

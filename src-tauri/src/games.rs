@@ -10,8 +10,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
+use parking_lot::Mutex;
 use sysinfo::{ProcessesToUpdate, System};
 
 pub struct ProcessListState(Mutex<System>);
@@ -25,7 +25,7 @@ impl Default for ProcessListState {
 /// Every currently-running process's executable base name, lowercased.
 #[tauri::command]
 pub fn running_process_names(state: tauri::State<'_, ProcessListState>) -> Vec<String> {
-    let mut system = state.0.lock().unwrap();
+    let mut system = state.0.lock();
     system.refresh_processes(ProcessesToUpdate::All, true);
     system
         .processes()

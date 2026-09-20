@@ -21,10 +21,11 @@
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 
@@ -58,6 +59,9 @@ struct Inner {
     clients: Arc<Mutex<Vec<Sender<String>>>>,
     port: Option<u16>,
     running: Arc<AtomicBool>,
+    /// The listener thread, kept so `stream_overlay_stop` can wait for it to
+    /// actually drop its `Server` — see that function.
+    listener: Option<thread::JoinHandle<()>>,
 }
 
 impl Default for Inner {
@@ -67,6 +71,7 @@ impl Default for Inner {
             clients: Arc::new(Mutex::new(Vec::new())),
             port: None,
             running: Arc::new(AtomicBool::new(false)),
+            listener: None,
         }
     }
 }
@@ -85,9 +90,15 @@ fn status_json(status: &Option<OverlayDeviceStatus>) -> String {
 /// already running just returns the existing URL.
 #[tauri::command]
 pub fn stream_overlay_start(state: tauri::State<StreamOverlayState>) -> Result<String, String> {
-    let mut guard = state.0.lock().map_err(|e| e.to_string())?;
-    if let Some(port) = guard.port {
-        return Ok(format!("http://127.0.0.1:{port}/"));
+    let mut guard = state.0.lock();
+    // `running`, not `port`, is what says the server is actually up: the
+    // listener thread clears it if it ever exits on its own (see `serve`), so
+    // a dead server is restarted here instead of being reported as running
+    // from a stale port.
+    if guard.running.load(Ordering::SeqCst) {
+        if let Some(port) = guard.port {
+            return Ok(format!("http://127.0.0.1:{port}/"));
+        }
     }
 
     // Prefer a fixed port so a previously-saved OBS Browser Source URL keeps
@@ -104,21 +115,31 @@ pub fn stream_overlay_start(state: tauri::State<StreamOverlayState>) -> Result<S
     let clients = guard.clients.clone();
     let status = guard.status.clone();
 
-    thread::spawn(move || serve(server, running, clients, status));
+    guard.listener = Some(thread::spawn(move || serve(server, running, clients, status)));
 
     Ok(format!("http://127.0.0.1:{port}/"))
 }
 
-/// Stops the server. The listener thread notices `running` went false on
-/// its next poll (at most `POLL_INTERVAL` later) and exits.
+/// Stops the server and waits for the listener thread to finish, so the
+/// socket is actually released before this returns. It used to just flip the
+/// flag and return: the thread only notices on its next poll (up to
+/// `POLL_INTERVAL` later) and the `Server` — and with it the fixed port —
+/// lives until it does, so turning the overlay off and straight back on
+/// failed to rebind `PREFERRED_PORT` and silently fell back to a random port,
+/// changing the URL the user had already saved in OBS. That is the one thing
+/// the fixed port exists to prevent.
 #[tauri::command]
 pub fn stream_overlay_stop(state: tauri::State<StreamOverlayState>) -> Result<(), String> {
-    let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+    let mut guard = state.0.lock();
     guard.running.store(false, Ordering::SeqCst);
-    guard.port = None;
-    if let Ok(mut clients) = guard.clients.lock() {
-        clients.clear();
+    // Dropping every sender is what ends each `/events` handler thread's
+    // `recv_timeout` loop, so the connections actually close rather than
+    // sitting open until the next write fails.
+    guard.clients.lock().clear();
+    if let Some(listener) = guard.listener.take() {
+        let _ = listener.join();
     }
+    guard.port = None;
     Ok(())
 }
 
@@ -130,14 +151,10 @@ pub fn stream_overlay_set_device_status(
     state: tauri::State<StreamOverlayState>,
     status: Option<OverlayDeviceStatus>,
 ) -> Result<(), String> {
-    let guard = state.0.lock().map_err(|e| e.to_string())?;
-    if let Ok(mut current) = guard.status.lock() {
-        *current = status.clone();
-    }
+    let guard = state.0.lock();
+    *guard.status.lock() = status.clone();
     let payload = format!("data: {}\n\n", status_json(&status));
-    if let Ok(mut clients) = guard.clients.lock() {
-        clients.retain(|tx| tx.send(payload.clone()).is_ok());
-    }
+    guard.clients.lock().retain(|tx| tx.send(payload.clone()).is_ok());
     Ok(())
 }
 
@@ -147,7 +164,14 @@ pub fn stream_overlay_set_device_status(
 /// avoids the log noise of a redundant "already running" round trip).
 #[tauri::command]
 pub fn stream_overlay_status(state: tauri::State<StreamOverlayState>) -> Result<Option<String>, String> {
-    let guard = state.0.lock().map_err(|e| e.to_string())?;
+    let guard = state.0.lock();
+    // The listener thread died on its own (see `serve`'s error arm) — report
+    // the overlay as not running instead of handing back a port nothing is
+    // listening on, so the Settings toggle and a re-`start` both see the
+    // truth.
+    if !guard.running.load(Ordering::SeqCst) {
+        return Ok(None);
+    }
     Ok(guard.port.map(|port| format!("http://127.0.0.1:{port}/")))
 }
 
@@ -166,7 +190,18 @@ fn serve(
         let request = match server.recv_timeout(POLL_INTERVAL) {
             Ok(Some(request)) => request,
             Ok(None) => continue,
-            Err(_) => break,
+            // tiny_http funnels accept-side failures into this same call, and
+            // there is no way back once its internal accept thread is gone —
+            // so stop for good, but say so and clear the flag: leaving
+            // `running` set had `stream_overlay_status` and the Settings
+            // toggle report the overlay as live while nothing was being
+            // served, with no log line anywhere to explain why OBS lost it
+            // mid-session.
+            Err(error) => {
+                applog!("[overlay] listener stopped: {error}");
+                running.store(false, Ordering::SeqCst);
+                break;
+            }
         };
 
         // `request.url()` is the raw request target, query string and all
@@ -200,9 +235,7 @@ fn handle_sse(
     status: Arc<Mutex<Option<OverlayDeviceStatus>>>,
 ) {
     let (tx, rx) = channel::<String>();
-    if let Ok(mut guard) = clients.lock() {
-        guard.push(tx);
-    }
+    clients.lock().push(tx);
 
     // `into_writer` hands back the raw connection with none of tiny_http's
     // usual header handling, since an SSE response needs to stay open and
@@ -218,7 +251,7 @@ fn handle_sse(
     // Paint whatever's already cached before waiting on the channel, so a
     // browser source that (re)loads mid-session doesn't sit blank until the
     // next status change.
-    let initial = status.lock().map(|s| s.clone()).unwrap_or(None);
+    let initial = status.lock().clone();
     if writer.write_all(format!("data: {}\n\n", status_json(&initial)).as_bytes()).and_then(|_| writer.flush()).is_err() {
         return;
     }

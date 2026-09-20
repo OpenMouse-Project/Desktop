@@ -52,8 +52,15 @@ pub fn install_udev_rules(app: tauri::AppHandle) -> Result<String, String> {
     use std::os::unix::process::ExitStatusExt;
     use std::process::Command;
 
+    // A path that isn't valid UTF-8 (a home directory with weird bytes) is a
+    // plain error here, not a panic — this runs inside a Tauri command, and
+    // a panic in one aborts the app rather than reporting anything.
+    let source_arg = source
+        .to_str()
+        .ok_or_else(|| format!("udev rule path is not valid UTF-8: {}", source.display()))?;
+
     let install = Command::new("pkexec")
-        .args(["install", "-m", "0644", source.to_str().unwrap(), RULE_DEST])
+        .args(["install", "-m", "0644", source_arg, RULE_DEST])
         .status();
     match install {
         Ok(status) if status.success() => {}
