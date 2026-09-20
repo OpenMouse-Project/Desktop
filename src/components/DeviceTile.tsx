@@ -1,21 +1,21 @@
 // One tile in the Devices grid. Separated from OverviewPage because the
 // artwork sizing needs per-image state: every product shot frames its mouse
-// differently, so the tile measures the artwork's alpha bounds once (cached in
-// device-images.ts) and sizes the image so the *mouse* — not the canvas —
-// comes out the same size in every tile.
+// differently, so the tile looks up the artwork's precomputed alpha bounds
+// (device-images.ts's ART_BOUNDS) and sizes the image so the *mouse* — not
+// the canvas — comes out the same size in every tile.
 //
 // The whole tile is the target: a transparent button covers it, which is what
 // replaced the separate Connect/View button. The corner light is the only
 // status affordance — steady green connected, slow pulse connecting, red
 // failed.
-import { useEffect, useState } from "preact/hooks";
+import { useState } from "preact/hooks";
 import { Battery, type Gauge } from "lucide-preact";
 import {
   artBounds,
   deviceArtStyle,
   deviceImage,
   deviceImageFallback,
-  type ArtBounds,
+  deviceImageFilename,
 } from "../native-hid/device-images";
 import type { CandidateInterface } from "../native-hid/scan";
 
@@ -46,27 +46,16 @@ function stateLabel(state: DeviceTileState, name: string): string {
 }
 
 export function DeviceTile({ candidate, displayName, features, state, battery, onSelect }: Props) {
+  const filename = deviceImageFilename(candidate.info.key, displayName);
   const source = deviceImage(candidate.info.key, displayName);
-  const [bounds, setBounds] = useState<ArtBounds | null>(null);
   const [artFailed, setArtFailed] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    // Resolves from cache after the first tile on this machine has seen the
-    // artwork, so only a genuinely new asset costs a decode.
-    void artBounds(source).then((measured) => {
-      if (!cancelled) setBounds(measured);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [source]);
-
-  // No bounds, or the artwork never loaded: fall back to plainly containing it
-  // in the tile rather than sizing it from measurements we do not have. A
-  // failed load also stops the measured style from being applied, so the
-  // placeholder is not blown up to product-shot size.
-  const artStyle = artFailed ? null : deviceArtStyle(bounds);
+  // No bounds (an asset with no precomputed entry), or the artwork never
+  // loaded: fall back to plainly containing it in the tile rather than
+  // sizing it from measurements we do not have. A failed load also stops the
+  // measured style from being applied, so the placeholder is not blown up to
+  // product-shot size.
+  const artStyle = artFailed ? null : deviceArtStyle(artBounds(filename));
 
   return (
     <li class={`device-card device-card--${state}`}>
