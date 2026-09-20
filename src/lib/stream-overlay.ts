@@ -13,6 +13,49 @@ import { invoke } from "@tauri-apps/api/core";
 
 const ENABLED_KEY = "openmouse:stream-overlay-enabled";
 const FIELDS_KEY = "openmouse:stream-overlay-fields";
+const DEVICE_KEY = "openmouse:stream-overlay-device";
+
+/**
+ * Which mouse the overlay should show, by `HidInterfaceInfo.key`. `null`
+ * (the default) means "whichever mouse is currently active in the app" —
+ * the only behavior this had before a device picker existed. With more than
+ * one mouse connected, that meant switching your active device mid-stream
+ * silently swapped what the overlay showed; picking a specific device here
+ * pins it instead (use-mouse-connection.ts only pushes an update when the
+ * active device's key matches this one).
+ */
+export function getStreamOverlayDeviceKey(): string | null {
+  try {
+    return localStorage.getItem(DEVICE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+const deviceKeyListeners = new Set<(key: string | null) => void>();
+
+export function saveStreamOverlayDeviceKey(key: string | null): void {
+  try {
+    if (key) localStorage.setItem(DEVICE_KEY, key);
+    else localStorage.removeItem(DEVICE_KEY);
+  } catch {
+    // Best-effort — worst case the preference doesn't survive a restart.
+  }
+  for (const listener of deviceKeyListeners) listener(key);
+}
+
+/**
+ * Returns an unsubscribe function. Immediately calls `listener` with the
+ * current pinned key. use-mouse-connection.ts's overlay-push effect uses
+ * this instead of reading localStorage directly so changing the pin in
+ * Settings re-pushes right away, not only the next time the active device's
+ * name/DPI/rate happens to change.
+ */
+export function subscribeStreamOverlayDeviceKey(listener: (key: string | null) => void): () => void {
+  deviceKeyListeners.add(listener);
+  listener(getStreamOverlayDeviceKey());
+  return () => deviceKeyListeners.delete(listener);
+}
 
 export interface StreamOverlayDeviceStatus {
   name: string;

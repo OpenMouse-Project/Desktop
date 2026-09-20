@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, PhysicalPosition, PhysicalSize, primaryMonitor } from "@tauri-apps/api/window";
 import { OVERLAY_MARGIN, OVERLAY_SIZE, getOverlaySettings, type OverlayCorner } from "./lib/overlay-settings";
 import { OVERLAY_TOAST_EVENT, type OverlayToastPayload } from "./lib/overlay-toast";
+import { applyTheme, THEME_CHANGE_EVENT, type ThemeState } from "./lib/themes";
 
 const DISPLAY_MS = 4500;
 
@@ -75,9 +76,16 @@ export function OverlayApp() {
     const unlisten = listen<OverlayToastPayload>(OVERLAY_TOAST_EVENT, (event) => {
       void present(event.payload);
     });
+    // Keeps this long-lived background window's theme in sync with a change
+    // made in the main window's Settings — see themes.ts's THEME_CHANGE_EVENT
+    // doc comment for why this doesn't just happen on its own.
+    const unlistenTheme = listen<ThemeState>(THEME_CHANGE_EVENT, (event) => {
+      applyTheme(event.payload);
+    });
 
     return () => {
       void unlisten.then((fn) => fn());
+      void unlistenTheme.then((fn) => fn());
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     };
   }, []);

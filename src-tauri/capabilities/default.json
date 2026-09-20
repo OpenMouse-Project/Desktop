@@ -16,6 +16,7 @@
     "core:app:allow-version",
     "updater:default",
     "process:default",
-    "core:event:allow-emit-to"
+    "core:event:allow-emit-to",
+    "autostart:default"
   ]
 }

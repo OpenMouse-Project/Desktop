@@ -12,15 +12,19 @@ import { runUpdateCheck } from "../lib/update-check";
 import { showOverlayToast } from "../lib/overlay-toast";
 import { CORNER_LABELS, getOverlaySettings, saveOverlaySettings, type OverlayCorner, type OverlaySettings } from "../lib/overlay-settings";
 import { getVersion } from "@tauri-apps/api/app";
+import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import type { ResourceMonitorData } from "../hooks/use-resource-monitor";
 import { getThemeState, saveThemeState, THEME_PRESETS, type ThemeState } from "../lib/themes";
+import type { MouseConnection } from "../hooks/use-mouse-connection";
 import {
   buildStreamOverlayUrl,
   disableStreamOverlay,
   enableStreamOverlay,
+  getStreamOverlayDeviceKey,
   getStreamOverlayFields,
   getStreamOverlayUrl,
   isStreamOverlayEnabled,
+  saveStreamOverlayDeviceKey,
   saveStreamOverlayFields,
   type StreamOverlayFields,
 } from "../lib/stream-overlay";
@@ -44,10 +48,15 @@ const CORNER_OPTIONS: { corner: OverlayCorner; abbr: string }[] = [
 
 interface Props {
   resourceMonitor: ResourceMonitorData;
+  connection: MouseConnection;
 }
 
-export function SettingsPage({ resourceMonitor }: Props) {
+export function SettingsPage({ resourceMonitor, connection }: Props) {
   const [exporting, setExporting] = useState(false);
+  const [streamOverlayDeviceKey, setStreamOverlayDeviceKey] = useState<string | null>(() => getStreamOverlayDeviceKey());
+  const overlayDeviceCandidates = connection.list.status === "loaded" ? connection.list.candidates : [];
+  const [autostartEnabled, setAutostartEnabled] = useState(false);
+  const [autostartError, setAutostartError] = useState("");
   const [checkingForUpdates, setCheckingForUpdates] = useState(false);
   const [version, setVersion] = useState("");
   const [discordEnabled, setDiscordEnabled] = useState(
@@ -68,6 +77,12 @@ export function SettingsPage({ resourceMonitor }: Props) {
 
   useEffect(() => {
     void getVersion().then(setVersion);
+  }, []);
+
+  useEffect(() => {
+    isAutostartEnabled()
+      .then(setAutostartEnabled)
+      .catch((error) => setAutostartError(error instanceof Error ? error.message : String(error)));
   }, []);
 
   // Restarts the server on app launch if the user had it on last session —
@@ -186,6 +201,18 @@ export function SettingsPage({ resourceMonitor }: Props) {
     void showOverlayToast({ text: "Test notification — this is what a game-switch alert looks like.", kind: "info" });
   }
 
+  async function toggleAutostart(enabled: boolean) {
+    setAutostartError("");
+    setAutostartEnabled(enabled);
+    try {
+      if (enabled) await enableAutostart();
+      else await disableAutostart();
+    } catch (error) {
+      setAutostartEnabled(!enabled);
+      setAutostartError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   async function toggleDiscordRpc(enabled: boolean) {
     setDiscordError("");
     setDiscordEnabled(enabled);
@@ -217,6 +244,35 @@ export function SettingsPage({ resourceMonitor }: Props) {
   return (
     <section class="page">
       <h1 class="page-title">Settings</h1>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          <span class="setting-title discord-setting-title">
+            Launch on startup
+            {autostartError && (
+              <span
+                class="setting-error-badge"
+                data-tooltip={autostartError}
+                aria-label={`Launch on startup error: ${autostartError}`}
+                tabIndex={0}
+              >
+                Error
+              </span>
+            )}
+          </span>
+          <span class="setting-description">
+            Start OpenMouse automatically when you log in, minimized to the tray.
+          </span>
+        </div>
+        <label class="switch">
+          <input
+            type="checkbox"
+            checked={autostartEnabled}
+            onChange={(event) => void toggleAutostart(event.currentTarget.checked)}
+          />
+          <span class="switch-track" />
+        </label>
+      </div>
 
       <div class="setting-row">
         <div class="setting-label">
@@ -421,6 +477,28 @@ export function SettingsPage({ resourceMonitor }: Props) {
 
           {streamOverlayEnabled && streamOverlayUrl && (
             <>
+              {overlayDeviceCandidates.length > 1 && (
+                <div class="overlay-settings-row">
+                  <span class="setting-eyebrow">Mouse</span>
+                  <select
+                    class="overlay-device-select"
+                    value={streamOverlayDeviceKey ?? ""}
+                    onChange={(event) => {
+                      const key = event.currentTarget.value || null;
+                      setStreamOverlayDeviceKey(key);
+                      saveStreamOverlayDeviceKey(key);
+                    }}
+                  >
+                    <option value="">Whichever mouse is active</option>
+                    {overlayDeviceCandidates.map((candidate) => (
+                      <option key={candidate.info.key} value={candidate.info.key}>
+                        {candidate.info.productString || candidate.brands.join(" / ")}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div class="overlay-settings-row">
                 <span class="setting-eyebrow">Fields</span>
                 <div class="stream-overlay-field-picker">

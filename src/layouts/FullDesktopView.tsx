@@ -46,7 +46,7 @@ export function FullDesktopView() {
             ) : page === "supported" ? (
               <SupportedPage />
             ) : (
-              <SettingsPage resourceMonitor={resourceMonitor} />
+              <SettingsPage resourceMonitor={resourceMonitor} connection={connection} />
             )}
           </div>
         </div>

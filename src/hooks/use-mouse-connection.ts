@@ -28,7 +28,7 @@ import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
 import { getRememberedDevice, rememberDevice, rememberDeviceName } from "../native-hid/device-store";
 import { isHidBusyError, isQueuedNotProcessedError } from "../native-hid/hid-open-lock";
 import { dismissToast, showProgressToast, showToast, updateToast } from "../lib/toast";
-import { pushStreamOverlayStatus } from "../lib/stream-overlay";
+import { pushStreamOverlayStatus, subscribeStreamOverlayDeviceKey } from "../lib/stream-overlay";
 
 // How often a connected device's status re-reads itself in the background,
 // so battery/DPI/etc. drift on their own instead of only updating after an
@@ -639,10 +639,23 @@ export function useMouseConnection() {
   // the feature on.
   const overlayDpi = connected?.status.dpi ?? null;
   const overlayPollingRateHz = connected?.status.pollingRateHz ?? null;
+  const overlayKey = connected?.key ?? null;
+  // A user with more than one mouse can pin the overlay to a specific one
+  // (Settings' device picker, saved via stream-overlay.ts) instead of it
+  // following whichever device happens to be active — otherwise switching
+  // devices mid-stream would silently swap what the overlay shows. Held in
+  // state via subscription, not read once, so flipping the pin in Settings
+  // re-pushes immediately rather than waiting for the active device's own
+  // name/DPI/rate to next change.
+  const [overlayPinnedKey, setOverlayPinnedKey] = useState<string | null>(null);
+  useEffect(() => subscribeStreamOverlayDeviceKey(setOverlayPinnedKey), []);
   useEffect(() => {
-    const status = trayName === null ? null : { name: trayName, dpi: overlayDpi, pollingRateHz: overlayPollingRateHz };
+    const matchesPin = overlayPinnedKey === null || overlayKey === overlayPinnedKey;
+    const status = trayName === null || !matchesPin
+      ? null
+      : { name: trayName, dpi: overlayDpi, pollingRateHz: overlayPollingRateHz };
     void pushStreamOverlayStatus(status).catch(() => {});
-  }, [trayName, overlayDpi, overlayPollingRateHz]);
+  }, [trayName, overlayDpi, overlayPollingRateHz, overlayKey, overlayPinnedKey]);
 
   // Just switches back to the list — the snapshot stays cached (see module
   // docs above). Re-scans in the background so a newly plugged-in device

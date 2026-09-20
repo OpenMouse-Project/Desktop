@@ -2478,6 +2478,16 @@ body {
   gap: 0.4rem;
 }
 
+.overlay-device-select {
+  align-self: flex-start;
+  padding: 0.4rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--input);
+  color: var(--bright);
+  font-size: 0.85rem;
+}
+
 .overlay-corner-picker {
   display: flex;
   gap: 0.4rem;

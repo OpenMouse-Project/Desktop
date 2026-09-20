@@ -20,6 +20,11 @@ use resource_monitor::ResourceMonitorState;
 /// occupy on launch.
 const SCREEN_FRACTION: f64 = 0.75;
 
+/// Passed as an extra launch arg by the autostart plugin (see `run()`
+/// below) so `setup()` can tell "the OS started this at login" apart from
+/// "the user double-clicked it" — the only two ways this process starts.
+const AUTOSTART_FLAG: &str = "--autostart";
+
 fn size_window(window: &WebviewWindow) {
     if let Ok(Some(monitor)) = window.primary_monitor() {
         let scale = monitor.scale_factor();
@@ -139,6 +144,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![AUTOSTART_FLAG.into()]),
+        ))
         .manage(discord_rpc::DiscordRpcState::default())
         .manage(HidRegistry::default())
         .manage(HidApiHandle::default())
@@ -184,6 +193,15 @@ pub fn run() {
 
             if let Some(window) = app.get_webview_window("main") {
                 size_window(&window);
+                // Launched by the OS at login (see the autostart plugin's
+                // extra arg above), not by the user double-clicking it —
+                // stay out of the way in the tray instead of throwing a
+                // window in their face the moment they log in. A user
+                // launching it normally never has this arg, so that path is
+                // unaffected.
+                if std::env::args().any(|arg| arg == AUTOSTART_FLAG) {
+                    let _ = window.hide();
+                }
             }
 
             // The overlay window (game-switch toasts — src/OverlayApp.tsx)

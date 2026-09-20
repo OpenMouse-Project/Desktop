@@ -13,9 +13,22 @@
 // <style>. State lives in localStorage so it survives restarts and is shared
 // across the main + overlay windows (same origin).
 
+import { emitTo } from "@tauri-apps/api/event";
+
 const PREF_THEME = "openmouse.theme";
 const PREF_CUSTOM_CSS = "openmouse.theme.custom-css";
 const STYLE_ID = "om-custom-theme-css";
+
+/**
+ * Fired at the "overlay" window whenever the main window saves a new theme,
+ * so the always-on-top game-alert overlay (OverlayApp.tsx) picks it up
+ * immediately instead of only the next time it's recreated. Both windows
+ * load `initTheme()` from the same localStorage on startup, which covers a
+ * fresh launch — but the overlay is a long-lived background window that
+ * doesn't reload, so a theme change made while it's already running never
+ * reached its own separate `document` without this.
+ */
+export const THEME_CHANGE_EVENT = "openmouse-theme-changed";
 
 export interface ThemePreset {
   id: string;
@@ -52,6 +65,9 @@ export function saveThemeState(state: ThemeState): void {
     localStorage.removeItem(PREF_CUSTOM_CSS);
   }
   applyTheme(state);
+  // Best-effort — if the overlay window somehow isn't there (older build,
+  // whatever), the main window's own theme change above still applied fine.
+  void emitTo("overlay", THEME_CHANGE_EVENT, state).catch(() => {});
 }
 
 /** Push a theme state onto the DOM (root `data-theme` + a custom-CSS <style>). */
