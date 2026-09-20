@@ -25,10 +25,10 @@ import {
   type ConnectedDevice,
 } from "../native-hid/scan";
 import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
-import { getRememberedDevice, rememberDevice } from "../native-hid/device-store";
-import { isHidBusyError } from "../native-hid/hid-open-lock";
-import { showToast } from "../lib/toast";
-import { isStreamOverlayEnabled, pushStreamOverlayStatus } from "../lib/stream-overlay";
+import { getRememberedDevice, rememberDevice, rememberDeviceName } from "../native-hid/device-store";
+import { isHidBusyError, isQueuedNotProcessedError } from "../native-hid/hid-open-lock";
+import { dismissToast, showProgressToast, showToast, updateToast } from "../lib/toast";
+import { pushStreamOverlayStatus } from "../lib/stream-overlay";
 
 // How often a connected device's status re-reads itself in the background,
 // so battery/DPI/etc. drift on their own instead of only updating after an
@@ -73,6 +73,58 @@ interface ConflictingApp {
 // garbled reply, etc.). Quitting the vendor app's process AND its background
 // services typically fixes it, so say that rather than dumping a cryptic
 // string on the connect page.
+/** Waits between manual-connect attempts — see connectWithBusyRetry. */
+function delay(ms: number): Promise<void> {
+  // Executor form: this project's TS lib predates ES2024, so
+  // `Promise.withResolvers` does not type-check here.
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+// A click must not lose to a background scan, nor to a mouse that has not
+// woken up yet. Three transient states land here:
+//   - native-hid's walk lock: another JS walk for this device is in flight.
+//   - hid.rs's `with_hid_api`: an enumeration is already running on the main
+//     thread, which refuses rather than blocking (that blocking lock
+//     self-deadlocked the main thread and froze the whole window).
+//   - the mouse echoing a command back unprocessed — `returned status 0x00`,
+//     see isQueuedNotProcessedError. CONFIRMED in the on-disk log on a
+//     wireless Razer: the status walk's own firmware getter came back that way
+//     for every candidate, and the same connect succeeded moments later, which
+//     is exactly the "click Connect until it takes" this app was reported for.
+// A manual connect waits these out. The budget is deliberately long enough to
+// ride out a flaky link: CONFIRMED with a Razer receiver that answers a command
+// with status 0x02 (processed) in bursts and echoes 0x00 in between — a 5-second
+// window mostly missed those bursts, while the progress toast below means the
+// user can see the attempt is still running rather than clicking again.
+// Repeating callers (the 5 s auto-refresh, the 3 s transport scan, the
+// awaiting-return reconnect) keep a single attempt because they retry on their
+// own timers — except the one-shot launch reconnect, which passes `retry`
+// explicitly.
+const MANUAL_CONNECT_ATTEMPTS = 60;
+const MANUAL_CONNECT_DELAY_MS = 500;
+
+async function connectWithRetry(
+  info: HidInterfaceInfo,
+  opts?: { silent?: boolean; silentErrors?: boolean; retry?: boolean },
+): Promise<ConnectedDevice> {
+  const attempts = opts?.retry || !(opts?.silent || opts?.silentErrors) ? MANUAL_CONNECT_ATTEMPTS : 1;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await connectToInterface(info);
+    } catch (error) {
+      if (attempt >= attempts - 1) throw error;
+      const busy = isHidBusyError(error);
+      if (!busy && !isQueuedNotProcessedError(error)) throw error;
+      void invoke("log_line", {
+        line: `[connect] ${info.key}: retrying after ${busy ? "busy" : "queued command"} (${attempt + 1}/${attempts})`,
+      }).catch(() => {});
+      await delay(MANUAL_CONNECT_DELAY_MS);
+    }
+  }
+}
+
 async function conflictMessageOr(error: unknown): Promise<string> {
   try {
     const apps = await invoke<ConflictingApp[]>("detect_conflicting_apps");
@@ -130,6 +182,11 @@ export function useMouseConnection() {
   const [connected, setConnected] = useState<ConnectedDevice | null>(null);
   const [view, setView] = useState<"list" | "device">("list");
   const [connectingKey, setConnectingKey] = useState<string | null>(null);
+  // The device whose last *user-initiated* connect failed, which is what the
+  // tile's red light reports until the next attempt. Background callers (the
+  // 5 s refresh, the 3 s transport scan) retry on their own timers and must
+  // not leave a device looking broken.
+  const [failedKey, setFailedKey] = useState<string | null>(null);
 
   // Auto-reconnect is a one-shot courtesy on launch, not something a later
   // manual "Refresh" should repeat — once the user is looking at the device
@@ -182,29 +239,65 @@ export function useMouseConnection() {
   // is the in-session counterpart, scoped to a device that was connected and
   // then physically went away, not to whatever the user last browsed.
   const awaitingReturnRef = useRef<HidInterfaceInfo | null>(null);
+  // Bumped by every walk that is going to commit a snapshot (`connect` and
+  // `switchTo`). A walk whose generation is no longer the latest throws its
+  // result away instead of committing it. The two kinds of walk are on
+  // different hid-open-lock keys (the receiver's and the cable's), so nothing
+  // else serializes them — and an in-flight background refresh used to land
+  // *after* a transport switch had already committed the wired snapshot,
+  // putting the older Wireless one back on top for the rest of the session
+  // (no retry either, since that key had already been marked as seen). The
+  // UI, tray and overlay then reported Wireless until the user manually
+  // reconnected or relaunched.
+  const walkGenerationRef = useRef(0);
 
-  const connect = useCallback(async (candidate: CandidateInterface, opts?: { silent?: boolean }) => {
+  const connect = useCallback(async (candidate: CandidateInterface, opts?: { silent?: boolean; silentErrors?: boolean; retry?: boolean }) => {
     const key = candidate.info.key;
     // Same underlying call whether this is a first connect or a background/
     // manual re-read of the device already showing — only the toast wording
     // differs, so tell them apart before the read (status.name isn't known
     // for a fresh connect's error case).
     const isRefresh = connectedRef.current?.key === key;
+    const generation = walkGenerationRef.current + 1;
+    walkGenerationRef.current = generation;
     setConnectingKey(key);
+    // A connect that needs retries used to look like a click that did nothing,
+    // which is what made people click again — and land on the walk lock for
+    // their trouble. The progress toast is sticky until the outcome is known.
+    // Background callers get none: they run every few seconds and must stay
+    // silent (updateToast(null) below is a no-op).
+    const name = candidate.info.productString || "device";
+    const progress = opts?.silent || opts?.silentErrors
+      ? null
+      : showProgressToast(isRefresh ? `Refreshing ${name}…` : `Connecting to ${name}…`);
     try {
-      const device = await connectToInterface(candidate.info);
+      const device = await connectWithRetry(candidate.info, opts);
+      // Superseded while this walk was on the wire (a transport switch, or a
+      // newer reconnect) — see walkGenerationRef.
+      if (generation !== walkGenerationRef.current) {
+        if (progress !== null) dismissToast(progress);
+        return;
+      }
       lastReadAtRef.current = Date.now();
       awaitingReturnRef.current = null;
       setConnected(device);
       lastCandidateRef.current = candidate;
       rememberDevice(candidate.info, device.brand);
+      // What it actually is, not what its interface called itself: a receiver
+      // enumerates as "USB Receiver" and only reveals "PRO X SUPERLIGHT 2c"
+      // when the HID++ read above asks it. The device list shows this.
+      rememberDeviceName(candidate.info.key, device.status.name);
+      setFailedKey((previous) => (previous === candidate.info.key ? null : previous));
       // Only switch to the device view on a *new* connection — background
       // re-reads of the already-connected device must not yank the user back
       // to the device page when they've navigated to the list.
       if (!isRefresh) setView("device");
-      if (!opts?.silent) {
-        showToast(isRefresh ? `${device.status.name} refreshed.` : `Connected to ${device.status.name}.`, "success");
-      }
+      updateToast(progress, {
+        text: isRefresh ? `${device.status.name} refreshed.` : `Connected to ${device.status.name}.`,
+        kind: "success",
+        loading: false,
+        durationMs: 4000,
+      });
     } catch (error) {
       // connectToInterface() enforces the "one walk per device at a time"
       // lock itself now (native-hid/hid-open-lock.ts) — a busy error here
@@ -212,13 +305,49 @@ export function useMouseConnection() {
       // click, or a dev-server hot-reload remount) is already mid-walk on
       // this same device, not that this one actually failed. Swallow it
       // rather than showing the user an error for something that isn't one.
-      if (isHidBusyError(error)) return;
-      if (!opts?.silent) {
+      if (isHidBusyError(error)) {
+        if (progress !== null) dismissToast(progress);
+        return;
+      }
+      // `silentErrors` is for a caller that retries on its own timer: the
+      // awaiting-return reconnect runs every transport scan (3 s), so a
+      // device that is enumerated but not answering — a receiver whose mouse
+      // is asleep, say — used to toast the raw driver error again and again
+      // with no way to make it stop short of unplugging the dongle. The
+      // success path still toasts, since that one is worth interrupting for.
+      if (!opts?.silent && !opts?.silentErrors) {
+        setFailedKey(key);
+        // The toast is the user-facing half; this line is the one that
+        // survives the session. A connect that needs several clicks is
+        // exactly the kind of report with no reproduction attached, so the
+        // raw driver error goes to the on-disk log as well.
+        void invoke("log_line", {
+          line: `[connect] ${key} failed: ${error instanceof Error ? error.message : String(error)}`,
+        }).catch(() => {});
+        // The device *is* answering: its receiver replies to every command with
+        // status 0x00 — received, not processed (0x02 is done) — echoing our own
+        // class/command back. CONFIRMED by reading those replies in the log for
+        // a Razer whose receiver was enumerated, accepted every write, and
+        // never ran one. That is a receiver with nothing behind it: unpaired,
+        // out of range, or wedged. It is not something the app can retry past,
+        // so name the remedy rather than dumping the status wall.
+        if (isQueuedNotProcessedError(error)) {
+          const name = candidate.info.productString || "This device";
+          updateToast(progress, {
+            text: `${name} isn't accepting commands — unplug its receiver for a moment and plug it back in, then try again.`,
+            kind: "error",
+            loading: false,
+            durationMs: 8000,
+          });
+          return;
+        }
         const message = await conflictMessageOr(error);
-        showToast(message, "error");
+        updateToast(progress, { text: message, kind: "error", loading: false, durationMs: 6000 });
       }
     } finally {
-      setConnectingKey(null);
+      // Only the walk that is still current owns the "connecting…" state; a
+      // superseded one must not clear it out from under its replacement.
+      if (generation === walkGenerationRef.current) setConnectingKey(null);
     }
   }, []);
 
@@ -271,8 +400,11 @@ export function useMouseConnection() {
           && (candidates.find((c) => c.info.key === remembered.key)
             ?? candidates.find((c) => isSiblingTransport(c.info, remembered)));
         // Silent: a remembered device that's simply not plugged in yet
-        // shouldn't greet the user with an error toast on every launch.
-        if (match) void connect(match, { silent: true });
+        // shouldn't greet the user with an error toast on every launch. `retry`
+        // because this is the one connect with no timer behind it — a mouse
+        // that answers an unprocessed echo for a moment would otherwise leave
+        // the app sitting on the device list until the user clicked.
+        if (match) void connect(match, { silent: true, retry: true });
       }
     } catch (error) {
       setList({ status: "error", message: error instanceof Error ? error.message : String(error) });
@@ -391,7 +523,11 @@ export function useMouseConnection() {
           ?? candidates.find((c) => isSiblingTransport(c.info, awaiting));
         if (back) {
           setList((prev) => (prev.status === "loaded" ? { status: "loaded", candidates } : prev));
-          await connect(back);
+          // Errors stay quiet: this scan runs every few seconds and will try
+          // again, so a device that is present but not answering must not
+          // produce a toast per tick. The success toast still comes from
+          // connect() itself.
+          await connect(back, { silentErrors: true });
           if (connectedRef.current) setAwaitingReturn(false);
         }
         return;
@@ -413,8 +549,17 @@ export function useMouseConnection() {
 
       const switchTo = async (target: CandidateInterface, expectWired: boolean): Promise<boolean> => {
         switchingRef.current = true;
+        // Claiming the newest generation is what retires any status refresh
+        // already on the wire for the old transport — see
+        // walkGenerationRef. Without it that refresh committed its older
+        // snapshot after this switch, silently reverting the app to the
+        // Wireless transport for the rest of the session.
+        const generation = walkGenerationRef.current + 1;
+        walkGenerationRef.current = generation;
         try {
           const device = await connectToInterface(target.info);
+          // Superseded by a newer walk while this one was reading.
+          if (generation !== walkGenerationRef.current) return false;
           // Same mouse? The serial settles it where the driver reports one;
           // the product-string match already got us here otherwise.
           const sameUnit = device.status.unitId == null || current.status.unitId == null
@@ -479,13 +624,22 @@ export function useMouseConnection() {
   // Same cache, pushed to the OBS overlay server (stream_overlay.rs) — a
   // separate effect from the tray one above because the overlay cares about
   // DPI/polling rate too, which the tray menu doesn't show and so isn't in
-  // its dependency list. A no-op on the Rust side when the user hasn't
-  // turned the overlay on, so this just always fires rather than tracking
-  // the setting's own effect.
+  // its dependency list.
+  //
+  // Deliberately unconditional, not gated on isStreamOverlayEnabled(): the
+  // Rust side just caches the latest snapshot (cheap) and a new `/events`
+  // connection is painted from that cache the moment it opens
+  // (stream_overlay.rs's handle_sse), so pushing while the overlay is *off*
+  // is what makes turning it on show the already-connected mouse right away.
+  // Gating it here is a real bug that was fixed: the effect's own
+  // dependencies (name/DPI/polling rate) don't change when the user flips the
+  // setting, so the server's cache stayed empty and both the Settings preview
+  // and the OBS source said "No mouse connected" until some field happened to
+  // change on the device — looking broken exactly when someone first turns
+  // the feature on.
   const overlayDpi = connected?.status.dpi ?? null;
   const overlayPollingRateHz = connected?.status.pollingRateHz ?? null;
   useEffect(() => {
-    if (!isStreamOverlayEnabled()) return;
     const status = trayName === null ? null : { name: trayName, dpi: overlayDpi, pollingRateHz: overlayPollingRateHz };
     void pushStreamOverlayStatus(status).catch(() => {});
   }, [trayName, overlayDpi, overlayPollingRateHz]);
@@ -512,6 +666,7 @@ export function useMouseConnection() {
     connectedInfo,
     view,
     connectingKey,
+    failedKey,
     select,
     refreshCurrent,
     refresh,

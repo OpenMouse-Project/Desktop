@@ -19,7 +19,14 @@ export function ToastHost() {
         return (
           <div class={`toast toast-${toast.kind}`} key={toast.id}>
             <Icon class="toast-icon" size={16} aria-hidden="true" />
-            <span class="toast-text">{toast.text}</span>
+            <span class="toast-body">
+              <span class="toast-text">{toast.text}</span>
+              {toast.loading && (
+                <span class="toast-progress" role="progressbar" aria-label={toast.text}>
+                  <span />
+                </span>
+              )}
+            </span>
             <button class="toast-dismiss" onClick={() => dismissToast(toast.id)} aria-label="Dismiss">
               <X size={13} />
             </button>

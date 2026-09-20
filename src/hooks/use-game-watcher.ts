@@ -56,6 +56,17 @@ export type GamesListState =
 // not something that needs sub-second reaction — matches this app's other
 // background poll (use-mouse-connection.ts's device auto-refresh) in spirit.
 const POLL_INTERVAL_MS = 4000;
+// Slower cadence while the window is hidden: minimized, hidden to the tray,
+// or covered by a fullscreen game. Same reasoning as use-mouse-connection.ts's
+// own hidden cadence — this hook's whole reason for living above the page
+// (see the module docs) is to act while the app is tabbed away, and the
+// overlay toast exists for the case where this window isn't visible, so a
+// hidden window must not stop launch/close detection; it just doesn't need
+// to look as often. Skipping outright was a real bug: with the app closed to
+// the tray — which is how it's meant to be used while gaming — both the
+// launch and the quit were missed, so the profile never applied and the
+// pre-game settings were never restored.
+const HIDDEN_POLL_INTERVAL_MS = 15_000;
 
 // Hosted straight out of this (public) repo via jsDelivr's GitHub CDN, so
 // adding/editing a game is just a commit+push to games.json — no app
@@ -150,6 +161,13 @@ export function useGameWatcher(connection: MouseConnection) {
   // every single poll tick for as long as a game stays open or closed.
   const previouslyRunningRef = useRef<Set<string>>(new Set());
   const activeOverrideRef = useRef<ActiveOverride | null>(null);
+  // When the last scan actually ran, so the hidden cadence above is measured
+  // from real scans rather than from interval ticks.
+  const lastScanAtRef = useRef(0);
+  // Games whose launch edge was seen while no device was controllable — see
+  // `applyOnLaunch`'s return value. Retried by `poll()` until they land (or
+  // the game closes first), instead of being dropped for the whole session.
+  const pendingLaunchRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     fetchGamesFile()
@@ -209,12 +227,20 @@ export function useGameWatcher(connection: MouseConnection) {
       void showOverlayToast({ text, kind });
     }
 
-    async function applyOnLaunch(game: Game) {
+    /**
+     * Applies a launched game's profile. Returns `false` only when the launch
+     * couldn't be acted on *yet* — no device is controllable at this instant
+     * (mouse asleep, receiver pulled, nothing connected) — which is the
+     * caller's cue to keep it pending and retry rather than count the game as
+     * handled. A profile that isn't set to auto-apply, or a write that fails,
+     * both count as handled: retrying those would just repeat the same no-op
+     * or the same error toast every few seconds.
+     */
+    async function applyOnLaunch(game: Game): Promise<boolean> {
       const profile = getGameProfile(game.id);
-      if (!profile?.autoApply || !isProfileMeaningful(profile)) return;
+      if (!profile?.autoApply || !isProfileMeaningful(profile)) return true;
       const { connected, connectedInfo, patchStatus } = connectionRef.current;
-      const canControl = connectedInfo !== null;
-      if (!canControl || !connectedInfo || !connected) return;
+      if (!connectedInfo || !connected) return false;
 
       // The first game to take over is the one whose "before" snapshot
       // matters — that's what "default" means here. A second game taking
@@ -224,7 +250,12 @@ export function useGameWatcher(connection: MouseConnection) {
         ? activeOverrideRef.current.restore
         : {
             dpi: profile.dpi !== undefined ? connected.status.dpi : undefined,
-            dpiY: profile.dpiY !== undefined ? connected.status.dpiY : undefined,
+            // Y is snapshotted whenever X is, not only when the profile names
+            // a Y: LogitechHidppClient.setDpi(dpi, dpiY = dpi) defaults Y to
+            // X, so a dpi-only profile overwrites Y too. Leaving it out of
+            // the snapshot would restore the pre-game *X* onto Y afterwards,
+            // silently changing the Y axis on a separate-axes mouse.
+            dpiY: profile.dpi !== undefined ? connected.status.dpiY : undefined,
             pollingRateHz: profile.pollingRateHz !== undefined ? connected.status.pollingRateHz : undefined,
             liftOffDistance: profile.liftOffDistance !== undefined ? connected.status.liftOffDistance ?? undefined : undefined,
             gamingSurfaceMode: profile.gamingSurfaceMode !== undefined ? connected.status.gamingSurfaceMode ?? undefined : undefined,
@@ -243,34 +274,58 @@ export function useGameWatcher(connection: MouseConnection) {
         const message = error instanceof Error ? error.message : String(error);
         notify(`Couldn't apply "${game.name}" profile: ${message}`, "error");
       }
+      return true;
     }
 
-    async function restoreOnClose(game: Game) {
+    /**
+     * Puts the pre-game settings back when the game that took the mouse over
+     * closes. Returns `false` when there's no controllable device at this
+     * instant, leaving `activeOverrideRef` set so the caller retries — the
+     * override must NOT be cleared before the restore has actually landed:
+     * clearing it early (which is what this did) both marked the UI as
+     * restored while the mouse still had the game's DPI/polling/lift-off and
+     * threw away the only record of what to put back.
+     */
+    async function restoreOnClose(gameId: string, gameName: string): Promise<boolean> {
       const active = activeOverrideRef.current;
-      if (!active || active.gameId !== game.id) return;
-      activeOverrideRef.current = null;
-      setActiveOverride(null);
-
-      const restoreProfile: GameProfile = { ...active.restore, autoApply: false };
-      if (!isProfileMeaningful(restoreProfile)) return;
+      if (!active || active.gameId !== gameId) return true;
 
       const { connectedInfo, patchStatus } = connectionRef.current;
-      const canControl = connectedInfo !== null;
-      if (!canControl || !connectedInfo) return;
+      if (!connectedInfo) return false;
+
+      const clear = () => {
+        activeOverrideRef.current = null;
+        setActiveOverride(null);
+      };
+
+      const restoreProfile: GameProfile = { ...active.restore, autoApply: false };
+      // Nothing worth writing back (the profile's fields were all unset) —
+      // the override is done either way.
+      if (!isProfileMeaningful(restoreProfile)) {
+        clear();
+        return true;
+      }
 
       try {
         await applyGameProfile(connectedInfo, restoreProfile, patchStatus);
-        notify(`${game.name} closed — restored your default ${describeProfile(restoreProfile)}.`, "info");
+        clear();
+        notify(`${gameName} closed — restored your default ${describeProfile(restoreProfile)}.`, "info");
       } catch (error) {
+        // A write that genuinely failed is surfaced rather than retried: the
+        // retry below is only for "no device to write to yet", and repeating
+        // a real error would just re-toast it every poll.
+        clear();
         const message = error instanceof Error ? error.message : String(error);
         notify(`Couldn't restore your default settings: ${message}`, "error");
       }
+      return true;
     }
 
     async function poll() {
-      // No reason to keep scanning while nothing can even see the result —
-      // minimized, hidden to the tray, or occluded.
-      if (document.hidden) return;
+      // Hidden (minimized, tray, occluded by a fullscreen game) slows the
+      // scan down instead of stopping it — see HIDDEN_POLL_INTERVAL_MS.
+      if (document.hidden && Date.now() - lastScanAtRef.current < HIDDEN_POLL_INTERVAL_MS) return;
+      lastScanAtRef.current = Date.now();
       try {
         const names = await invoke<string[]>("running_process_names");
         if (cancelled) return;
@@ -287,8 +342,37 @@ export function useGameWatcher(connection: MouseConnection) {
         );
         previouslyRunningRef.current = nowRunning;
 
-        for (const game of justClosed) void restoreOnClose(game);
-        for (const game of justLaunched) void applyOnLaunch(game);
+        // A `false` return means "no device to write to right now" — the
+        // override stays set and the catch-up below retries it.
+        for (const game of justClosed) await restoreOnClose(game.id, game.name);
+        for (const game of justLaunched) {
+          if (!(await applyOnLaunch(game))) pendingLaunchRef.current.add(game.id);
+        }
+
+        // Catch-up for work that had no controllable device at the moment it
+        // was due (mouse asleep, receiver pulled, nothing connected yet).
+        // Without this each case was simply lost for the rest of the session:
+        // a launch never applied its profile, and a closed game's override
+        // was dropped along with the only record of what to restore.
+        const pending = activeOverrideRef.current;
+        if (pending && !nowRunning.has(pending.gameId)) {
+          await restoreOnClose(pending.gameId, pending.gameName);
+        }
+        if (pendingLaunchRef.current.size > 0) {
+          for (const game of games) {
+            if (!pendingLaunchRef.current.has(game.id)) continue;
+            // The game exited before a device showed up — nothing to apply.
+            if (!nowRunning.has(game.id)) {
+              pendingLaunchRef.current.delete(game.id);
+              continue;
+            }
+            // applyOnLaunch reads the "before" state off the device at the
+            // moment it runs, so a retry captures whatever the mouse is set
+            // to when it first becomes reachable again — the best available
+            // answer, since there was nothing to read at the launch edge.
+            if (await applyOnLaunch(game)) pendingLaunchRef.current.delete(game.id);
+          }
+        }
       } catch {
         // Best-effort — a failed scan just leaves the last known snapshot in
         // place rather than flashing every card to "not running."

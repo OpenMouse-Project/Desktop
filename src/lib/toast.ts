@@ -11,6 +11,9 @@ export interface ToastMessage {
   id: number;
   kind: ToastKind;
   text: string;
+  /** Renders an indeterminate progress bar: the toast reports work in
+   *  progress rather than a finished event, and does not auto-dismiss. */
+  loading?: boolean;
 }
 
 type Listener = (toasts: ToastMessage[]) => void;
@@ -23,11 +26,41 @@ function emit() {
   for (const listener of listeners) listener(toasts);
 }
 
-export function showToast(text: string, kind: ToastKind = "info", durationMs = 4000): void {
+/** Returns the toast's id, so it can be updated or dismissed later. */
+export function showToast(text: string, kind: ToastKind = "info", durationMs = 4000): number {
   const id = nextId++;
   toasts = [...toasts, { id, kind, text }];
   emit();
   setTimeout(() => dismissToast(id), durationMs);
+  return id;
+}
+
+/**
+ * A toast for work in progress: no auto-dismiss, and a progress bar. Used by
+ * the connect path, where a device that needs a few seconds of retries used to
+ * look like a click that did nothing — which is what made people click again.
+ */
+export function showProgressToast(text: string): number {
+  const id = nextId++;
+  toasts = [...toasts, { id, kind: "info", text, loading: true }];
+  emit();
+  return id;
+}
+
+/**
+ * Rewrites a toast in place — for one that reports a long-running action and
+ * then its outcome. Dismissing and re-adding would flicker, and re-animate the
+ * toast's own entrance.
+ */
+export function updateToast(
+  id: number | null,
+  patch: { text?: string; kind?: ToastKind; loading?: boolean; durationMs?: number },
+): void {
+  if (id === null) return;
+  toasts = toasts.map((toast) => (toast.id === id ? { ...toast, ...patch } : toast));
+  emit();
+  const duration = patch.durationMs;
+  if (duration !== undefined) setTimeout(() => dismissToast(id), duration);
 }
 
 export function dismissToast(id: number): void {
