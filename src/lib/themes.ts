@@ -103,7 +103,13 @@ function accentCssFromHex(hex: string): string {
   const b = parseInt(clean.slice(4, 6), 16) || 0;
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   const ink = luminance > 0.55 ? "#0c0d0f" : "#f5f6f8";
-  return `:root[data-theme="dynamic"] { --ui-accent: ${hex}; --ui-accent-ink: ${ink}; `
+  // Two rules: an unconditional `--dynamic-accent-preview`, which App.css's
+  // swatch picker reads for the Dynamic option's own preview dot regardless
+  // of which theme is actually active (so it can be previewed before being
+  // selected), and the `[data-theme="dynamic"]` accent override, which only
+  // takes effect once Dynamic actually is the active theme.
+  return `:root { --dynamic-accent-preview: ${hex}; } `
+    + `:root[data-theme="dynamic"] { --ui-accent: ${hex}; --ui-accent-ink: ${ink}; `
     + `--ui-accent-soft: color-mix(in srgb, ${hex} 16%, transparent); }`;
 }
 
@@ -128,9 +134,13 @@ function applyDynamicStyle(css: string): void {
  * The overlay never calls this itself — it just re-reads the cache
  * `applyTheme` already checks, whenever the main window's own
  * THEME_CHANGE_EVENT broadcast (below) tells it to.
+ *
+ * Runs regardless of whether "dynamic" is the *active* preset — the Theme
+ * picker's Dynamic swatch shows the real computed color as its own preview
+ * dot even while some other theme is selected, so it needs a real sample
+ * to show, not just a placeholder until the user actually picks it.
  */
 export async function refreshDynamicAccent(): Promise<void> {
-  if (getThemeState().presetId !== "dynamic") return;
   try {
     const hex = await invoke<string>("wallpaper_accent_color");
     const css = accentCssFromHex(hex);
@@ -148,11 +158,12 @@ export function applyTheme(state: ThemeState): void {
   const root = document.documentElement;
   root.dataset.theme = state.presetId === "default" ? "default" : state.presetId;
 
-  if (state.presetId === "dynamic") {
-    applyDynamicStyle(localStorage.getItem(DYNAMIC_CACHE_KEY) ?? accentCssFromHex(DYNAMIC_FALLBACK_HEX));
-  } else {
-    document.getElementById(DYNAMIC_STYLE_ID)?.remove();
-  }
+  // Kept applied regardless of which preset is active: its accent-override
+  // half only takes effect under `[data-theme="dynamic"]` (a no-op selector
+  // otherwise), but its preview-dot variable needs to stay live so the
+  // Dynamic swatch shows the real computed color even while browsing other
+  // presets, not just after switching to it.
+  applyDynamicStyle(localStorage.getItem(DYNAMIC_CACHE_KEY) ?? accentCssFromHex(DYNAMIC_FALLBACK_HEX));
 
   let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
   if (!state.customCss) {

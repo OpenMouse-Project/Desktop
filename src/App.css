@@ -3007,29 +3007,46 @@ body {
   flex-shrink: 0;
 }
 
-[data-theme="emerald"] .theme-preset-acc,
+/*
+ * Scoped to `.theme-preset-swatch[data-theme-preview="X"]` only — NOT also
+ * to the bare `[data-theme="X"] .theme-preset-acc` these used to include.
+ * `.theme-preset-acc` is only ever used inside this swatch picker (nowhere
+ * else reads "the live active theme's color"), but that bare form matches
+ * every dot on the page once theme X is active on <html> — not just that
+ * theme's own swatch — because every dot is a descendant of it. CONFIRMED:
+ * this is why every OTHER preset's dot (Matt, Dynamic — neither had its own
+ * override) turned solid violet the moment Violet was selected, then blue
+ * the moment Ice was, instead of showing each preset's own fixed color.
+ */
+.theme-preset-swatch[data-theme-preview="default"] .theme-preset-acc {
+  background: #f5975c;
+}
+
 .theme-preset-swatch[data-theme-preview="emerald"] .theme-preset-acc {
   background: #58c97c;
 }
 
-[data-theme="violet"] .theme-preset-acc,
 .theme-preset-swatch[data-theme-preview="violet"] .theme-preset-acc {
   background: #a98bff;
 }
 
-[data-theme="ice"] .theme-preset-acc,
 .theme-preset-swatch[data-theme-preview="ice"] .theme-preset-acc {
   background: #54b6f5;
 }
 
-[data-theme="mono"] .theme-preset-acc,
 .theme-preset-swatch[data-theme-preview="mono"] .theme-preset-acc {
   background: #d0d0d3;
 }
 
-[data-theme="light"] .theme-preset-acc,
 .theme-preset-swatch[data-theme-preview="light"] .theme-preset-acc {
   background: #fbfbf8;
+}
+
+/* Not a fixed color: --dynamic-accent-preview is set unconditionally at
+ * :root by themes.ts (see accentCssFromHex), independent of which theme is
+ * actually active, specifically so this dot can show it regardless. */
+.theme-preset-swatch[data-theme-preview="dynamic"] .theme-preset-acc {
+  background: var(--dynamic-accent-preview, #5dde89);
 }
 
 .theme-preset-label {
