@@ -21,6 +21,7 @@ const PREF_CUSTOM_CSS = "openmouse.theme.custom-css";
 const STYLE_ID = "om-custom-theme-css";
 const DYNAMIC_STYLE_ID = "om-dynamic-theme-css";
 const DYNAMIC_CACHE_KEY = "openmouse.theme.dynamic-accent-css";
+const DYNAMIC_SIGNATURE_KEY = "openmouse.theme.dynamic-wallpaper-signature";
 /** Same default green the app ships with everywhere else, used until the
  *  first wallpaper sample lands (or forever, on a platform without one). */
 const DYNAMIC_FALLBACK_HEX = "#5dde89";
@@ -105,7 +106,7 @@ export function saveThemeState(state: ThemeState): void {
   // Picking "Dynamic" applies the cached/fallback accent immediately (see
   // applyTheme above) and kicks off a real sample right away, rather than
   // waiting for the next launch or an unrelated refresh to land one.
-  if (state.presetId === "dynamic") void refreshDynamicAccent();
+  if (state.presetId === "dynamic") void refreshDynamicAccent(true);
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -236,15 +237,33 @@ function applyDynamicStyle(css: string): void {
  * picker's Dynamic swatch shows the real computed color as its own preview
  * dot even while some other theme is selected, so it needs a real sample
  * to show, not just a placeholder until the user actually picks it.
+ *
+ * Unless `force`, this checks wallpaper.rs's cheap `wallpaper_signature`
+ * (a file path + mtime, no image decode) first and returns immediately if
+ * it matches the last one seen. CONFIRMED as a real, user-visible freeze
+ * without this: startDynamicAccentWatcher's focus listener means every
+ * alt-tab back into the app was spawning osascript AND fully decoding +
+ * resizing the wallpaper file — genuinely slow for a large photo, and it
+ * was paying that cost every single time, wallpaper unchanged or not.
+ * `force` is for the two callers who need a guaranteed fresh sample
+ * regardless of signature — the cold-start refresh (main.tsx) and picking
+ * "Dynamic" in Settings — since a stale color there would look like the
+ * feature doing nothing.
  */
-export async function refreshDynamicAccent(): Promise<void> {
+export async function refreshDynamicAccent(force = false): Promise<void> {
   try {
+    if (!force) {
+      const signature = await invoke<string>("wallpaper_signature");
+      if (signature === localStorage.getItem(DYNAMIC_SIGNATURE_KEY)) return;
+      localStorage.setItem(DYNAMIC_SIGNATURE_KEY, signature);
+    }
     const hex = await invoke<string>("wallpaper_accent_color");
     const css = accentCssFromHex(hex);
     // Skip if the wallpaper's color hasn't actually moved since the last
-    // sample — both to avoid rewriting identical CSS on every poll (see
-    // startDynamicAccentWatcher below) and so a same-color re-sample doesn't
-    // needlessly fire the transition on a page nothing about is changing.
+    // sample — both to avoid rewriting identical CSS when the signature
+    // check above was skipped (force) or the file changed without its
+    // dominant color actually changing, and so a same-color re-sample
+    // doesn't needlessly fire the transition on a page nothing is changing.
     if (css === localStorage.getItem(DYNAMIC_CACHE_KEY)) return;
     withThemeTransition(() => applyDynamicStyle(css));
     localStorage.setItem(DYNAMIC_CACHE_KEY, css);

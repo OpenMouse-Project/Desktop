@@ -116,6 +116,33 @@ fn dominant_color(img: &image::DynamicImage) -> (u8, u8, u8) {
         .unwrap_or(FALLBACK_ACCENT)
 }
 
+/// Cheap "has the wallpaper changed" check — the path (osascript/registry
+/// read) plus the file's modified time, with no image decode at all.
+///
+/// The frontend polls on a timer and on every window focus (themes.ts's
+/// startDynamicAccentWatcher) to catch a wallpaper change without a manual
+/// refresh; calling `wallpaper_accent_color` for that would mean spawning
+/// osascript AND fully decoding + resizing the wallpaper file on every
+/// single focus event, wallpaper unchanged or not. CONFIRMED as a real,
+/// user-visible freeze on refocusing the app — a decode+resample of a large
+/// (multi-megapixel, common for a desktop background) image is genuinely
+/// slow enough to notice, and it was paying that cost every time regardless
+/// of whether anything had actually changed. This lets the frontend skip
+/// straight past that cost the overwhelming majority of the time, only
+/// calling the expensive command when this signature actually differs from
+/// the last one it saw.
+#[tauri::command]
+pub fn wallpaper_signature() -> Result<String, String> {
+    let path = wallpaper_path().map_err(|e| e.to_string())?;
+    let modified = std::fs::metadata(&path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    Ok(format!("{}|{modified}", path.display()))
+}
+
 #[tauri::command]
 pub fn wallpaper_accent_color() -> Result<String, String> {
     let path = wallpaper_path().map_err(|e| e.to_string())?;

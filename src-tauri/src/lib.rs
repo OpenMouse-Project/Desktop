@@ -180,6 +180,7 @@ pub fn run() {
             stream_overlay::stream_overlay_status,
             stream_overlay::stream_overlay_set_device_status,
             wallpaper::wallpaper_accent_color,
+            wallpaper::wallpaper_signature,
         ])
         .setup(|app| {
             // Diagnostics must outlive the process: stderr goes to whatever

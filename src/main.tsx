@@ -20,7 +20,7 @@ const isOverlay = getCurrentWindow().label === "overlay";
 // overlay never does this itself (see themes.ts's refreshDynamicAccent doc),
 // it only ever picks up what the main window broadcasts.
 if (!isOverlay) {
-  void refreshDynamicAccent();
+  void refreshDynamicAccent(true);
   startDynamicAccentWatcher();
 }
 

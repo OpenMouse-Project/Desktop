@@ -2910,6 +2910,29 @@ body {
   border-top: 1px solid var(--line);
 }
 
+.settings-section + .settings-section {
+  margin-top: 2rem;
+}
+
+.settings-section-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.settings-section .setting-row,
+.settings-section .setting-row-block {
+  margin-top: 0.75rem;
+}
+
+.settings-section .setting-row:first-of-type,
+.settings-section .setting-row-block:first-of-type {
+  margin-top: 0;
+}
+
 .theme-dropdown{
   border: 1px solid var(--line);
   background: var(--control);

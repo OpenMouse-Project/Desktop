@@ -245,6 +245,8 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
     <section class="page">
       <h1 class="page-title">Settings</h1>
 
+      <div class="settings-section">
+      <h2 class="settings-section-title">General</h2>
       <div class="setting-row">
         <div class="setting-label">
           <span class="setting-title discord-setting-title">
@@ -302,7 +304,10 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
           <span class="switch-track" />
         </label>
       </div>
+      </div>
 
+      <div class="settings-section">
+      <h2 class="settings-section-title">Appearance</h2>
       <div class="setting-row setting-row-block">
         <div class="setting-label">
           <span class="setting-title">Theme</span>
@@ -394,9 +399,10 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
           )}
         </div>
       </div>
+      </div>
 
-      <hr class="settings-divider" />
-
+      <div class="settings-section">
+      <h2 class="settings-section-title">Updates</h2>
       <div class="setting-row">
         <div class="setting-label">
           <span class="setting-title">Check for Updates</span>
@@ -425,7 +431,10 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
           <ScrollText size={14} /> View
         </button>
       </div>
+      </div>
 
+      <div class="settings-section">
+      <h2 class="settings-section-title">Streaming &amp; Overlays</h2>
       <div class="setting-row setting-row-block">
         <div class="setting-label">
           <span class="setting-title">Game-switch overlay</span>
@@ -561,7 +570,10 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
           )}
         </div>
       </div>
+      </div>
 
+      <div class="settings-section">
+      <h2 class="settings-section-title">Diagnostics</h2>
       <div class="setting-row">
         <div class="setting-label">
           <span class="setting-title">Logs</span>
@@ -585,6 +597,7 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
           <ResourceMonitor data={resourceMonitor} />
         </div>
       )}
+      </div>
 
       {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} />}
 
