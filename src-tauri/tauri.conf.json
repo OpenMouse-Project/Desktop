@@ -21,7 +21,12 @@
         "minHeight": 500,
         "decorations": false,
         "transparent": true,
-        "shadow": true
+        "shadow": true,
+        "windowEffects": {
+          "effects": ["sidebar", "mica"],
+          "radius": 10,
+          "state": "followsWindowActiveState"
+        }
       },
       {
         "label": "overlay",

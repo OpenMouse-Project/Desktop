@@ -406,7 +406,7 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
         <div class="setting-label">
           <span class="setting-title">Window transparency</span>
           <span class="setting-description">
-            Let the desktop show through the window — the app is already set up to be transparent, this just controls how much.
+            Let a blurred view of your desktop show through the window — lower is more see-through.
           </span>
         </div>
         <div class="window-opacity-control">
