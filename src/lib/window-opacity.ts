@@ -46,10 +46,18 @@ export function initWindowOpacity(): void {
 // containers, blurring whatever the native layer already put behind them.
 // It's additive, not a substitute — even at 0px here, the native layer is
 // still blurring; this controls how much *extra* softening sits on top.
+//
+// The range runs all the way to 80px, not a conservative ~20px, so the two
+// ends are actually different looks rather than variations on "a little
+// soft": near 0 reads close to plain transparency (a crisp, barely-touched
+// view of the desktop through the panel), while the top end washes
+// everything behind the window into an indistinct blur that reads as
+// nearly solid/opaque — genuinely the opposite end of the same spectrum,
+// not just "slightly more blur."
 
 const BLUR_PREF_KEY = "openmouse.window-blur";
 const DEFAULT_BLUR = 0;
-const MAX_BLUR = 24;
+const MAX_BLUR = 80;
 
 export function getPanelBlur(): number {
   const raw = localStorage.getItem(BLUR_PREF_KEY);

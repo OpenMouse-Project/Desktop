@@ -456,8 +456,8 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
               <input
                 type="range"
                 min={0}
-                max={24}
-                step={1}
+                max={80}
+                step={2}
                 value={panelBlur}
                 onInput={(event) => {
                   const value = Number(event.currentTarget.value);
@@ -468,7 +468,7 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
               />
               <span class="window-opacity-value">{panelBlur}px</span>
             </div>
-            <span class="setting-description">Extra softening on top of the window's own native blur, for a heavier frosted-glass look.</span>
+            <span class="setting-description">Extra softening on top of the window's own native blur — low is crisp and nearly transparent, high washes it into a solid frosted haze.</span>
           </div>
 
           {theme.presetId === "dynamic" && (
