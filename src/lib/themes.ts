@@ -36,6 +36,27 @@ const DYNAMIC_FALLBACK_HEX = "#5dde89";
  */
 export const THEME_CHANGE_EVENT = "openmouse-theme-changed";
 
+/** How long the transition CSS (see withThemeTransition) stays applied — must match App.css's `.theme-transition` duration. */
+const THEME_TRANSITION_MS = 380;
+const THEME_TRANSITION_CLASS = "theme-transition";
+
+/**
+ * Runs `apply` with a temporary class on <html> that App.css gives a
+ * transition to (background/border/text color, ~380ms) — plain preset
+ * switches (and a live wallpaper re-sample) otherwise jump instantly, since
+ * nothing about a CSS custom-property change is animatable on its own; the
+ * transition has to live on the properties that actually read those
+ * variables, scoped to a short window around the change rather than left on
+ * permanently, which would fight every other hover/focus transition in the
+ * app for the rest of the session.
+ */
+function withThemeTransition(apply: () => void): void {
+  const root = document.documentElement;
+  root.classList.add(THEME_TRANSITION_CLASS);
+  apply();
+  window.setTimeout(() => root.classList.remove(THEME_TRANSITION_CLASS), THEME_TRANSITION_MS);
+}
+
 export interface ThemePreset {
   id: string;
   label: string;
@@ -77,7 +98,7 @@ export function saveThemeState(state: ThemeState): void {
   } else {
     localStorage.removeItem(PREF_CUSTOM_CSS);
   }
-  applyTheme(state);
+  withThemeTransition(() => applyTheme(state));
   // Best-effort — if the overlay window somehow isn't there (older build,
   // whatever), the main window's own theme change above still applied fine.
   void emitTo("overlay", THEME_CHANGE_EVENT, state).catch(() => {});
@@ -220,13 +241,35 @@ export async function refreshDynamicAccent(): Promise<void> {
   try {
     const hex = await invoke<string>("wallpaper_accent_color");
     const css = accentCssFromHex(hex);
-    applyDynamicStyle(css);
+    // Skip if the wallpaper's color hasn't actually moved since the last
+    // sample — both to avoid rewriting identical CSS on every poll (see
+    // startDynamicAccentWatcher below) and so a same-color re-sample doesn't
+    // needlessly fire the transition on a page nothing about is changing.
+    if (css === localStorage.getItem(DYNAMIC_CACHE_KEY)) return;
+    withThemeTransition(() => applyDynamicStyle(css));
     localStorage.setItem(DYNAMIC_CACHE_KEY, css);
     void emitTo("overlay", THEME_CHANGE_EVENT, getThemeState()).catch(() => {});
   } catch {
     // Best-effort — whatever was already showing (cache, or the fallback
     // green from applyTheme) stays exactly as good a guess as before.
   }
+}
+
+/**
+ * Keeps the Dynamic theme in sync with the desktop wallpaper while the app
+ * is running, not just at launch — there's no OS-level "wallpaper changed"
+ * event this reaches for cross-platform, so it polls instead: a plain
+ * interval, plus an immediate check on window focus so switching back to
+ * the app after changing wallpapers elsewhere doesn't sit stale for up to a
+ * full interval. Call once from the main window only (see
+ * refreshDynamicAccent's own doc comment for why); safe to call
+ * unconditionally regardless of which preset is actually active, same as
+ * refreshDynamicAccent itself.
+ */
+export function startDynamicAccentWatcher(): void {
+  const POLL_MS = 60_000;
+  window.setInterval(() => void refreshDynamicAccent(), POLL_MS);
+  window.addEventListener("focus", () => void refreshDynamicAccent());
 }
 
 /** Push a theme state onto the DOM (root `data-theme` + a custom-CSS <style>). */

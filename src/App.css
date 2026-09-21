@@ -1,3 +1,15 @@
+/*
+ * Applied to <html> only for a brief window around a theme switch (see
+ * themes.ts's withThemeTransition) — never left on permanently, which would
+ * apply this transition to every hover/focus color change in the app too,
+ * not just an actual theme switch.
+ */
+.theme-transition,
+.theme-transition * {
+  transition: background-color 380ms ease, border-color 380ms ease, color 380ms ease,
+    fill 380ms ease, box-shadow 380ms ease !important;
+}
+
 :root {
   --ink: #09090b;
   --sidebar: #0d0d0f;
