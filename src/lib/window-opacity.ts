@@ -37,3 +37,38 @@ export function saveWindowOpacity(percent: number): void {
 export function initWindowOpacity(): void {
   applyWindowOpacity(getWindowOpacity());
 }
+
+// Blur amount, layered on top of the opacity above. The native vibrancy
+// material (tauri.conf.json's windowEffects — macOS "sidebar"/Windows
+// "mica") does the actual blur-behind-the-window and has no adjustable
+// radius through its public API on either platform, so this is a second,
+// independent blur: a plain CSS backdrop-filter on the app's own outer
+// containers, blurring whatever the native layer already put behind them.
+// It's additive, not a substitute — even at 0px here, the native layer is
+// still blurring; this controls how much *extra* softening sits on top.
+
+const BLUR_PREF_KEY = "openmouse.window-blur";
+const DEFAULT_BLUR = 0;
+const MAX_BLUR = 24;
+
+export function getPanelBlur(): number {
+  const raw = localStorage.getItem(BLUR_PREF_KEY);
+  const value = raw ? Number(raw) : DEFAULT_BLUR;
+  return Number.isFinite(value) ? Math.min(MAX_BLUR, Math.max(0, value)) : DEFAULT_BLUR;
+}
+
+export function applyPanelBlur(px: number): void {
+  const clamped = Math.min(MAX_BLUR, Math.max(0, px));
+  document.documentElement.style.setProperty("--panel-blur", `${clamped}px`);
+}
+
+export function savePanelBlur(px: number): void {
+  const clamped = Math.min(MAX_BLUR, Math.max(0, px));
+  localStorage.setItem(BLUR_PREF_KEY, String(clamped));
+  applyPanelBlur(clamped);
+}
+
+/** Apply the persisted blur on startup — called once before first render, same as initWindowOpacity(). */
+export function initPanelBlur(): void {
+  applyPanelBlur(getPanelBlur());
+}

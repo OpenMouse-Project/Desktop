@@ -16,6 +16,10 @@
    * is what actually makes that visible by letting it through the shell,
    * sidebar, and title bar's own backgrounds — see how it's consumed below. */
   --window-opacity: 100%;
+  /* Extra blur layered on top of the native vibrancy material (which has no
+   * adjustable radius of its own) — see window-opacity.ts's panel-blur
+   * functions and how it's consumed below. */
+  --panel-blur: 0px;
   --ink: #09090b;
   --sidebar: #0d0d0f;
   --card: #111113;
@@ -216,6 +220,8 @@ button:focus-visible {
   height: 30px;
   flex-shrink: 0;
   background: color-mix(in srgb, var(--sidebar) var(--window-opacity), transparent);
+  backdrop-filter: blur(var(--panel-blur));
+  -webkit-backdrop-filter: blur(var(--panel-blur));
   border-bottom: 1px solid var(--line);
 }
 
@@ -361,6 +367,8 @@ button:focus-visible {
   overflow: hidden;
   border-radius: 10px;
   background: color-mix(in srgb, var(--ink) var(--window-opacity), transparent);
+  backdrop-filter: blur(var(--panel-blur));
+  -webkit-backdrop-filter: blur(var(--panel-blur));
 }
 
 .full-desktop-view {
@@ -377,6 +385,8 @@ button:focus-visible {
   width: 56px;
   flex-shrink: 0;
   background: color-mix(in srgb, var(--sidebar) var(--window-opacity), transparent);
+  backdrop-filter: blur(var(--panel-blur));
+  -webkit-backdrop-filter: blur(var(--panel-blur));
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -2913,6 +2923,13 @@ body {
   margin: 1.5rem 0;
   border: none;
   border-top: 1px solid var(--line);
+}
+
+.window-effects-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.6rem;
 }
 
 .window-opacity-control {
