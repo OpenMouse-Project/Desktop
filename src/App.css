@@ -2925,11 +2925,21 @@ body {
   border-top: 1px solid var(--line);
 }
 
-.window-effects-picker {
+.window-effects-group {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 0.6rem;
+  gap: 1rem;
+  width: 100%;
+}
+
+.window-effects-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.window-effects-item .window-opacity-control {
+  min-width: 0;
 }
 
 .window-opacity-control {

@@ -32,7 +32,6 @@ import {
   saveWindowOpacity,
 } from "../lib/window-opacity";
 
-type WindowEffectMode = "opacity" | "blur" | "vibrancy";
 import type { MouseConnection } from "../hooks/use-mouse-connection";
 import {
   buildStreamOverlayUrl,
@@ -89,7 +88,6 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
   const [dynamicVibrancy, setDynamicVibrancyState] = useState<number>(() => getDynamicVibrancy());
   const [windowOpacity, setWindowOpacity] = useState<number>(() => getWindowOpacity());
   const [panelBlur, setPanelBlur] = useState<number>(() => getPanelBlur());
-  const [windowEffectMode, setWindowEffectMode] = useState<WindowEffectMode>("opacity");
   const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   const [streamOverlayEnabled, setStreamOverlayEnabled] = useState(() => isStreamOverlayEnabled());
   const [streamOverlayUrl, setStreamOverlayUrl] = useState<string | null>(null);
@@ -100,13 +98,6 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
   useEffect(() => {
     void getVersion().then(setVersion);
   }, []);
-
-  // The dropdown only offers "Vibrancy" while Dynamic is the active theme —
-  // if it's selected and the user switches themes, fall back to Transparency
-  // rather than leaving the picker on an option that's no longer offered.
-  useEffect(() => {
-    if (windowEffectMode === "vibrancy" && theme.presetId !== "dynamic") setWindowEffectMode("opacity");
-  }, [theme.presetId, windowEffectMode]);
 
   useEffect(() => {
     isAutostartEnabled()
@@ -433,62 +424,57 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
         <div class="setting-label">
           <span class="setting-title">Window effects</span>
           <span class="setting-description">
-            {windowEffectMode === "opacity"
-              ? "Let a blurred view of your desktop show through the window — lower is more see-through."
-              : windowEffectMode === "blur"
-                ? "Extra softening on top of the window's own native blur, for a heavier frosted-glass look."
-                : "How saturated the Dynamic theme's wallpaper-derived colors are — 0 is neutral gray, 100 is as calibrated, above that pushes further."}
+            Transparency, blur, and (with the Dynamic theme) color intensity — all in one place.
           </span>
         </div>
-        <div class="window-effects-picker">
-          <select
-            class="theme-dropdown"
-            value={windowEffectMode}
-            onChange={(event) => setWindowEffectMode(event.currentTarget.value as WindowEffectMode)}
-          >
-            <option value="opacity">Transparency</option>
-            <option value="blur">Blur</option>
-            {theme.presetId === "dynamic" && <option value="vibrancy">Vibrancy</option>}
-          </select>
-          <div class="window-opacity-control">
-            {windowEffectMode === "opacity" && (
-              <>
-                <input
-                  type="range"
-                  min={40}
-                  max={100}
-                  step={1}
-                  value={windowOpacity}
-                  onInput={(event) => {
-                    const value = Number(event.currentTarget.value);
-                    setWindowOpacity(value);
-                    applyWindowOpacity(value);
-                  }}
-                  onChange={(event) => saveWindowOpacity(Number(event.currentTarget.value))}
-                />
-                <span class="window-opacity-value">{windowOpacity}%</span>
-              </>
-            )}
-            {windowEffectMode === "blur" && (
-              <>
-                <input
-                  type="range"
-                  min={0}
-                  max={24}
-                  step={1}
-                  value={panelBlur}
-                  onInput={(event) => {
-                    const value = Number(event.currentTarget.value);
-                    setPanelBlur(value);
-                    applyPanelBlur(value);
-                  }}
-                  onChange={(event) => savePanelBlur(Number(event.currentTarget.value))}
-                />
-                <span class="window-opacity-value">{panelBlur}px</span>
-              </>
-            )}
-            {windowEffectMode === "vibrancy" && theme.presetId === "dynamic" && (
-              <>
+
+        <div class="window-effects-group">
+          <div class="window-effects-item">
+            <span class="setting-eyebrow">Transparency</span>
+            <div class="window-opacity-control">
+              <input
+                type="range"
+                min={40}
+                max={100}
+                step={1}
+                value={windowOpacity}
+                onInput={(event) => {
+                  const value = Number(event.currentTarget.value);
+                  setWindowOpacity(value);
+                  applyWindowOpacity(value);
+                }}
+                onChange={(event) => saveWindowOpacity(Number(event.currentTarget.value))}
+              />
+              <span class="window-opacity-value">{windowOpacity}%</span>
+            </div>
+            <span class="setting-description">Let a blurred view of your desktop show through the window — lower is more see-through.</span>
+          </div>
+
+          <div class="window-effects-item">
+            <span class="setting-eyebrow">Blur</span>
+            <div class="window-opacity-control">
+              <input
+                type="range"
+                min={0}
+                max={24}
+                step={1}
+                value={panelBlur}
+                onInput={(event) => {
+                  const value = Number(event.currentTarget.value);
+                  setPanelBlur(value);
+                  applyPanelBlur(value);
+                }}
+                onChange={(event) => savePanelBlur(Number(event.currentTarget.value))}
+              />
+              <span class="window-opacity-value">{panelBlur}px</span>
+            </div>
+            <span class="setting-description">Extra softening on top of the window's own native blur, for a heavier frosted-glass look.</span>
+          </div>
+
+          {theme.presetId === "dynamic" && (
+            <div class="window-effects-item">
+              <span class="setting-eyebrow">Vibrancy</span>
+              <div class="window-opacity-control">
                 <input
                   type="range"
                   min={0}
@@ -503,9 +489,10 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
                   onChange={(event) => saveDynamicVibrancy(Number(event.currentTarget.value))}
                 />
                 <span class="window-opacity-value">{dynamicVibrancy}%</span>
-              </>
-            )}
-          </div>
+              </div>
+              <span class="setting-description">How saturated the Dynamic theme's wallpaper-derived colors are — 0 is neutral gray, 100 is as calibrated, above that pushes further.</span>
+            </div>
+          )}
         </div>
       </div>
       </div>
