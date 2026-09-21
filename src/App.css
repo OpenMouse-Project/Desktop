@@ -451,7 +451,7 @@ button:focus-visible {
   align-items: center;
   padding: 0.6rem 1.5rem;
   border-bottom: 1px solid var(--line);
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
 }
 
 .app-header-status {
@@ -622,7 +622,7 @@ button:focus-visible {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1rem 1.25rem;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
   margin-bottom: 0.75rem;
 }
 
@@ -823,7 +823,7 @@ button:focus-visible {
   padding: 0.85rem;
   border: 1px solid var(--line-strong);
   border-radius: 10px;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
   cursor: pointer;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
 }
@@ -1216,7 +1216,7 @@ button:focus-visible {
   scrollbar-width: none;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
   padding: 1.5rem;
 }
 
@@ -1335,7 +1335,7 @@ button:focus-visible {
 .empty-state {
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
   padding: 3rem 2rem;
   text-align: center;
   margin-top: 2rem;
@@ -1563,7 +1563,7 @@ button:focus-visible {
   min-height: 0;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
   padding: 1rem 1.1rem;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
@@ -2004,7 +2004,7 @@ button:focus-visible {
   padding: 0 0.7rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
   color: var(--muted);
 }
 
@@ -2058,7 +2058,7 @@ button:focus-visible {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
 }
 
 .supported-brand-rail {
@@ -2242,7 +2242,7 @@ button:focus-visible {
   justify-content: center;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
   text-align: center;
 }
 
@@ -2584,7 +2584,7 @@ body {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1.1rem 1.25rem;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
   margin-bottom: 0.75rem;
 }
 
@@ -2693,7 +2693,7 @@ body {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1.1rem 1.25rem;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
   margin-bottom: 0.75rem;
 }
 
@@ -2807,7 +2807,7 @@ body {
 .dpi-axis-field input {
   width: 100%;
   border: 1px solid var(--line-strong);
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
   color: var(--bright);
   padding: 0.5rem 0.65rem;
   border-radius: 8px;
@@ -2861,7 +2861,7 @@ body {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1.1rem 1.25rem;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
 }
 
 .sensor-panel-title {
@@ -3357,7 +3357,7 @@ body {
   padding: 1.75rem;
   border: 1px solid var(--warning);
   border-radius: 14px;
-  background: var(--card);
+  background: color-mix(in srgb, var(--card) var(--window-opacity), transparent);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
