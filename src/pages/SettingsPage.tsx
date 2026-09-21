@@ -14,7 +14,15 @@ import { CORNER_LABELS, getOverlaySettings, saveOverlaySettings, type OverlayCor
 import { getVersion } from "@tauri-apps/api/app";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import type { ResourceMonitorData } from "../hooks/use-resource-monitor";
-import { getThemeState, saveThemeState, THEME_PRESETS, type ThemeState } from "../lib/themes";
+import {
+  applyDynamicVibrancy,
+  getDynamicVibrancy,
+  getThemeState,
+  saveDynamicVibrancy,
+  saveThemeState,
+  THEME_PRESETS,
+  type ThemeState,
+} from "../lib/themes";
 import { applyWindowOpacity, getWindowOpacity, saveWindowOpacity } from "../lib/window-opacity";
 import type { MouseConnection } from "../hooks/use-mouse-connection";
 import {
@@ -69,6 +77,7 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const [overlaySettings, setOverlaySettings] = useState<OverlaySettings>(() => getOverlaySettings());
   const [theme, setTheme] = useState<ThemeState>(() => getThemeState());
+  const [dynamicVibrancy, setDynamicVibrancyState] = useState<number>(() => getDynamicVibrancy());
   const [windowOpacity, setWindowOpacity] = useState<number>(() => getWindowOpacity());
   const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   const [streamOverlayEnabled, setStreamOverlayEnabled] = useState(() => isStreamOverlayEnabled());
@@ -348,6 +357,28 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
             </button>
           ))}
         </div>
+
+        {theme.presetId === "dynamic" && (
+          <div class="overlay-settings-row">
+            <span class="setting-eyebrow">Vibrancy</span>
+            <div class="window-opacity-control">
+              <input
+                type="range"
+                min={0}
+                max={150}
+                step={1}
+                value={dynamicVibrancy}
+                onInput={(event) => {
+                  const value = Number(event.currentTarget.value);
+                  setDynamicVibrancyState(value);
+                  applyDynamicVibrancy(value);
+                }}
+                onChange={(event) => saveDynamicVibrancy(Number(event.currentTarget.value))}
+              />
+              <span class="window-opacity-value">{dynamicVibrancy}%</span>
+            </div>
+          </div>
+        )}
 
         <div class="theme-custom">
           <button

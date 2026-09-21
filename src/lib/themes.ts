@@ -22,6 +22,13 @@ const STYLE_ID = "om-custom-theme-css";
 const DYNAMIC_STYLE_ID = "om-dynamic-theme-css";
 const DYNAMIC_CACHE_KEY = "openmouse.theme.dynamic-accent-css";
 const DYNAMIC_SIGNATURE_KEY = "openmouse.theme.dynamic-wallpaper-signature";
+/** The raw sampled hex, separate from the generated CSS — so the vibrancy
+ *  slider can regenerate the palette instantly (no wallpaper re-sample). */
+const DYNAMIC_HEX_KEY = "openmouse.theme.dynamic-accent-hex";
+const DYNAMIC_VIBRANCY_KEY = "openmouse.theme.dynamic-vibrancy";
+/** 100 = the ramp's own calibrated saturations, unscaled (see DARK_RAMP/
+ *  LIGHT_RAMP's doc comment) — not "maximum possible," just "as designed." */
+const DYNAMIC_VIBRANCY_DEFAULT = 100;
 /** Same default green the app ships with everywhere else, used until the
  *  first wallpaper sample lands (or forever, on a platform without one). */
 const DYNAMIC_FALLBACK_HEX = "#5dde89";
@@ -194,21 +201,67 @@ const LIGHT_RAMP: { key: string; s: number; l: number }[] = [
  * selecting Dynamic never visibly changed anything outside its own swatch
  * preview dot, which reads a separate variable this function also sets.
  */
-function accentCssFromHex(hex: string): string {
+/**
+ * `vibrancy` (0-150, see the slider in Settings) scales every saturation in
+ * the ramp — and the accent's own — by `vibrancy/100`, clamped to a valid
+ * 0-100 HSL saturation. 100 reproduces the ramp exactly as calibrated; below
+ * that mutes the whole palette toward gray (0 = fully neutral, hue
+ * irrelevant); above it pushes past the calibrated intensity, up to a hard
+ * ceiling at 100 saturation. The accent itself is included, not just the
+ * surface ramp — a "vibrancy" slider that left the one color most people
+ * actually look at untouched would feel like it wasn't doing anything.
+ */
+function accentCssFromHex(hex: string, vibrancy: number): string {
   const [r, g, b] = hexToRgb(hex);
-  const [hue] = rgbToHsl(r, g, b);
+  const [hue, saturation, lightness] = rgbToHsl(r, g, b);
+  const scale = vibrancy / 100;
+  const scaleSat = (s: number) => Math.min(100, Math.max(0, s * scale));
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  const accentInk = luminance > 0.55 ? hslToHex(hue, 30, 8) : hslToHex(hue, 15, 94);
+  const accentInk = luminance > 0.55 ? hslToHex(hue, scaleSat(30), 8) : hslToHex(hue, scaleSat(15), 94);
+  const accent = hslToHex(hue, scaleSat(saturation), lightness);
   const declarations = [...DARK_RAMP, ...LIGHT_RAMP]
-    .map(({ key, s, l }) => `${key}: ${hslToHex(hue, s, l)};`)
+    .map(({ key, s, l }) => `${key}: ${hslToHex(hue, scaleSat(s), l)};`)
     .join(" ");
   // Two rules: an unconditional `--dynamic-accent-preview`, which App.css's
   // swatch picker reads for the Dynamic option's own preview dot regardless
   // of which theme is actually active (so it can be previewed before being
   // selected), and the `[data-theme="dynamic"]` palette override, which only
   // takes effect once Dynamic actually is the active theme.
-  return `:root { --dynamic-accent-preview: ${hex}; } `
-    + `:root[data-theme="dynamic"] { ${declarations} --accent: ${hex}; --accent-ink: ${accentInk}; }`;
+  return `:root { --dynamic-accent-preview: ${accent}; } `
+    + `:root[data-theme="dynamic"] { ${declarations} --accent: ${accent}; --accent-ink: ${accentInk}; }`;
+}
+
+export function getDynamicVibrancy(): number {
+  const raw = localStorage.getItem(DYNAMIC_VIBRANCY_KEY);
+  const value = raw ? Number(raw) : DYNAMIC_VIBRANCY_DEFAULT;
+  return Number.isFinite(value) ? Math.min(150, Math.max(0, value)) : DYNAMIC_VIBRANCY_DEFAULT;
+}
+
+/**
+ * Regenerates the Dynamic theme's CSS from the last sampled wallpaper color
+ * at the new vibrancy — instantly, no wallpaper re-sample or Tauri call
+ * needed, since vibrancy is purely a saturation multiplier applied after
+ * the color's already been extracted.
+ *
+ * No transition here (unlike a preset switch or a real wallpaper update):
+ * this runs on every tick of a slider drag, and re-triggering a 380ms CSS
+ * transition that often would fight itself rather than look smooth — the
+ * live drag itself already reads as continuous motion.
+ */
+export function applyDynamicVibrancy(percent: number): void {
+  const clamped = Math.min(150, Math.max(0, percent));
+  const hex = localStorage.getItem(DYNAMIC_HEX_KEY) ?? DYNAMIC_FALLBACK_HEX;
+  applyDynamicStyle(accentCssFromHex(hex, clamped));
+}
+
+/** Persists the vibrancy slider's value and broadcasts it to the overlay. Call on release, not on every drag tick — see applyDynamicVibrancy for the live-preview half. */
+export function saveDynamicVibrancy(percent: number): void {
+  const clamped = Math.min(150, Math.max(0, percent));
+  localStorage.setItem(DYNAMIC_VIBRANCY_KEY, String(clamped));
+  applyDynamicVibrancy(clamped);
+  const hex = localStorage.getItem(DYNAMIC_HEX_KEY) ?? DYNAMIC_FALLBACK_HEX;
+  localStorage.setItem(DYNAMIC_CACHE_KEY, accentCssFromHex(hex, clamped));
+  void emitTo("overlay", THEME_CHANGE_EVENT, getThemeState()).catch(() => {});
 }
 
 function applyDynamicStyle(css: string): void {
@@ -258,7 +311,7 @@ export async function refreshDynamicAccent(force = false): Promise<void> {
       localStorage.setItem(DYNAMIC_SIGNATURE_KEY, signature);
     }
     const hex = await invoke<string>("wallpaper_accent_color");
-    const css = accentCssFromHex(hex);
+    const css = accentCssFromHex(hex, getDynamicVibrancy());
     // Skip if the wallpaper's color hasn't actually moved since the last
     // sample — both to avoid rewriting identical CSS when the signature
     // check above was skipped (force) or the file changed without its
@@ -267,6 +320,7 @@ export async function refreshDynamicAccent(force = false): Promise<void> {
     if (css === localStorage.getItem(DYNAMIC_CACHE_KEY)) return;
     withThemeTransition(() => applyDynamicStyle(css));
     localStorage.setItem(DYNAMIC_CACHE_KEY, css);
+    localStorage.setItem(DYNAMIC_HEX_KEY, hex);
     void emitTo("overlay", THEME_CHANGE_EVENT, getThemeState()).catch(() => {});
   } catch {
     // Best-effort — whatever was already showing (cache, or the fallback
@@ -310,7 +364,9 @@ export function applyTheme(state: ThemeState): void {
   // otherwise), but its preview-dot variable needs to stay live so the
   // Dynamic swatch shows the real computed color even while browsing other
   // presets, not just after switching to it.
-  applyDynamicStyle(localStorage.getItem(DYNAMIC_CACHE_KEY) ?? accentCssFromHex(DYNAMIC_FALLBACK_HEX));
+  applyDynamicStyle(
+    localStorage.getItem(DYNAMIC_CACHE_KEY) ?? accentCssFromHex(DYNAMIC_FALLBACK_HEX, getDynamicVibrancy()),
+  );
 
   let style = document.getElementById(STYLE_ID) as HTMLStyleElement | null;
   if (!state.customCss) {
