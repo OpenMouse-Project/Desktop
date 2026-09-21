@@ -123,30 +123,47 @@ fn dominant_color(img: &image::DynamicImage) -> (u8, u8, u8) {
 /// startDynamicAccentWatcher) to catch a wallpaper change without a manual
 /// refresh; calling `wallpaper_accent_color` for that would mean spawning
 /// osascript AND fully decoding + resizing the wallpaper file on every
-/// single focus event, wallpaper unchanged or not. CONFIRMED as a real,
-/// user-visible freeze on refocusing the app — a decode+resample of a large
-/// (multi-megapixel, common for a desktop background) image is genuinely
-/// slow enough to notice, and it was paying that cost every time regardless
-/// of whether anything had actually changed. This lets the frontend skip
-/// straight past that cost the overwhelming majority of the time, only
+/// single focus event, wallpaper unchanged or not. This lets the frontend
+/// skip straight past that cost the overwhelming majority of the time, only
 /// calling the expensive command when this signature actually differs from
 /// the last one it saw.
+///
+/// `async fn` + `spawn_blocking`, not a plain sync fn: Tauri's command
+/// macro runs a non-async command's body inline, on whatever thread
+/// dispatched the IPC message — there is no automatic offload to a
+/// background thread the way, say, a Rust web framework's blocking-request
+/// handling usually works. CONFIRMED still freezing the app on refocus even
+/// after adding the signature check above: the osascript spawn alone (a
+/// real subprocess launch, not a library call) is slow enough on its own to
+/// notice, and it was still running inline on that IPC-dispatch thread every
+/// time. `spawn_blocking` moves it onto tauri's dedicated blocking-executor
+/// thread pool instead, so the thread that actually needs to stay responsive
+/// never touches it.
 #[tauri::command]
-pub fn wallpaper_signature() -> Result<String, String> {
-    let path = wallpaper_path().map_err(|e| e.to_string())?;
-    let modified = std::fs::metadata(&path)
-        .and_then(|meta| meta.modified())
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
-    Ok(format!("{}|{modified}", path.display()))
+pub async fn wallpaper_signature() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let path = wallpaper_path().map_err(|e| e.to_string())?;
+        let modified = std::fs::metadata(&path)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        Ok(format!("{}|{modified}", path.display()))
+    })
+    .await
+    .map_err(|e| format!("wallpaper signature task panicked: {e}"))?
 }
 
 #[tauri::command]
-pub fn wallpaper_accent_color() -> Result<String, String> {
-    let path = wallpaper_path().map_err(|e| e.to_string())?;
-    let img = image::open(&path).map_err(|e| format!("could not open wallpaper image at {}: {e}", path.display()))?;
-    let (r, g, b) = dominant_color(&img);
-    Ok(format!("#{r:02x}{g:02x}{b:02x}"))
+pub async fn wallpaper_accent_color() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let path = wallpaper_path().map_err(|e| e.to_string())?;
+        let img = image::open(&path)
+            .map_err(|e| format!("could not open wallpaper image at {}: {e}", path.display()))?;
+        let (r, g, b) = dominant_color(&img);
+        Ok(format!("#{r:02x}{g:02x}{b:02x}"))
+    })
+    .await
+    .map_err(|e| format!("wallpaper accent task panicked: {e}"))?
 }
