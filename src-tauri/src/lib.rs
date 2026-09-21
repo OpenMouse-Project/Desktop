@@ -13,6 +13,7 @@ mod linux_permissions;
 mod resource_monitor;
 mod stream_overlay;
 mod tray;
+mod wallpaper;
 use hid::{HidApiHandle, HidRegistry};
 use resource_monitor::ResourceMonitorState;
 
@@ -178,6 +179,7 @@ pub fn run() {
             stream_overlay::stream_overlay_stop,
             stream_overlay::stream_overlay_status,
             stream_overlay::stream_overlay_set_device_status,
+            wallpaper::wallpaper_accent_color,
         ])
         .setup(|app| {
             // Diagnostics must outlive the process: stderr goes to whatever

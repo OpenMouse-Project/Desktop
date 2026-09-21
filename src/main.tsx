@@ -2,7 +2,7 @@ import { render } from "preact";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import { OverlayApp } from "./OverlayApp";
-import { initTheme } from "./lib/themes";
+import { initTheme, refreshDynamicAccent } from "./lib/themes";
 import "./App.css";
 
 // Apply the saved theme (preset + custom CSS) before first paint so there's
@@ -14,5 +14,11 @@ initTheme();
 // label check, so a single build serves both without needing a second
 // index.html or a client-side router this app otherwise has no use for.
 const isOverlay = getCurrentWindow().label === "overlay";
+
+// Re-sample the wallpaper on the main window's own launch, in case it
+// changed since the cached accent color initTheme() just applied — the
+// overlay never does this itself (see themes.ts's refreshDynamicAccent doc),
+// it only ever picks up what the main window broadcasts.
+if (!isOverlay) void refreshDynamicAccent();
 
 render(isOverlay ? <OverlayApp /> : <App />, document.getElementById("root")!);

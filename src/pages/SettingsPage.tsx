@@ -317,7 +317,7 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
               key={preset.id}
               class={`theme-preset-swatch ${theme.presetId === preset.id ? "active" : ""}`}
               data-theme-preview={preset.id}
-              title={preset.description}
+              title={preset.id === "dynamic" ? undefined : preset.description}
               aria-label={preset.label}
               onClick={() => {
                 const next = { ...theme, presetId: preset.id };
@@ -328,6 +328,16 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
             >
               <span class="theme-preset-acc" aria-hidden="true" />
               <span class="theme-preset-label">{preset.label}</span>
+              {preset.id === "dynamic" && (
+                <span
+                  class="info-badge"
+                  data-tooltip={preset.description}
+                  aria-label={preset.description}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  i
+                </span>
+              )}
             </button>
           ))}
         </div>
