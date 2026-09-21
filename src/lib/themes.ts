@@ -87,30 +87,106 @@ export function saveThemeState(state: ThemeState): void {
   if (state.presetId === "dynamic") void refreshDynamicAccent();
 }
 
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace("#", "");
+  return [
+    parseInt(clean.slice(0, 2), 16) || 0,
+    parseInt(clean.slice(2, 4), 16) || 0,
+    parseInt(clean.slice(4, 6), 16) || 0,
+  ];
+}
+
+/** Returns [hue 0-360, saturation 0-100, lightness 0-100]. */
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d === 0) return [0, 0, l * 100];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  let h: number;
+  if (max === rn) h = ((gn - bn) / d) % 6;
+  else if (max === gn) h = (bn - rn) / d + 2;
+  else h = (rn - gn) / d + 4;
+  h *= 60;
+  if (h < 0) h += 360;
+  return [h, s * 100, l * 100];
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const sn = s / 100;
+  const ln = l / 100;
+  const c = (1 - Math.abs(2 * ln - 1)) * sn;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = ln - c / 2;
+  let [r, g, b] = [0, 0, 0];
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  const toHex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
 /**
- * `#rrggbb` -> a `:root[data-theme="dynamic"]` block overriding just the
- * accent tokens — the "dynamic" preset otherwise sits on the same base
- * tokens as "default" (no `[data-theme="dynamic"]` block in App.css means
- * the bare `:root` values apply), so this is the entire visual difference.
- * The ink color is a plain luminance check rather than anything fancier:
- * this only ever needs to pick readable text on top of a solid swatch of
- * the accent, not model how humans perceive color.
+ * Every hand-tuned preset (Emerald/Violet/Ice/Mono in App.css) redefines the
+ * *whole* surface palette — ink, sidebar, card, raised, control, hover,
+ * line, line-strong, text, bright, dim, muted, faint — not just the accent,
+ * each one holding roughly the accent's own hue at a fixed saturation/
+ * lightness. These ramps are that same pattern, calibrated by converting
+ * Violet's actual token values to HSL: its hue holds ~250-260° across every
+ * token while lightness climbs from ~3.5% (ink) to ~97% (text), so building
+ * any hue through the same ramp reproduces that same "hand-tuned dark
+ * theme" look for whatever hue a wallpaper happens to produce.
+ */
+const DARK_RAMP: { key: string; s: number; l: number }[] = [
+  { key: "--ink", s: 33, l: 3.5 },
+  { key: "--sidebar", s: 31, l: 5 },
+  { key: "--card", s: 28, l: 7 },
+  { key: "--raised", s: 28, l: 10 },
+  { key: "--control", s: 30, l: 12 },
+  { key: "--hover", s: 29, l: 15.5 },
+  { key: "--line", s: 25, l: 20 },
+  { key: "--line-strong", s: 24, l: 25 },
+];
+
+const LIGHT_RAMP: { key: string; s: number; l: number }[] = [
+  { key: "--text", s: 40, l: 97 },
+  { key: "--bright", s: 45, l: 94 },
+  { key: "--dim", s: 22, l: 78 },
+  { key: "--muted", s: 16, l: 61 },
+  { key: "--faint", s: 13, l: 54 },
+];
+
+/**
+ * `#rrggbb` -> a `:root[data-theme="dynamic"]` block overriding the whole
+ * surface palette (see the ramp comment above), not just the accent — the
+ * earlier version only set `--ui-accent`/`--ui-accent-ink`/`--ui-accent-soft`,
+ * which don't exist anywhere in this app (its real tokens are `--accent`/
+ * `--accent-ink`; there's no "-soft" variant at all). CONFIRMED: that meant
+ * selecting Dynamic never visibly changed anything outside its own swatch
+ * preview dot, which reads a separate variable this function also sets.
  */
 function accentCssFromHex(hex: string): string {
-  const clean = hex.replace("#", "");
-  const r = parseInt(clean.slice(0, 2), 16) || 0;
-  const g = parseInt(clean.slice(2, 4), 16) || 0;
-  const b = parseInt(clean.slice(4, 6), 16) || 0;
+  const [r, g, b] = hexToRgb(hex);
+  const [hue] = rgbToHsl(r, g, b);
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  const ink = luminance > 0.55 ? "#0c0d0f" : "#f5f6f8";
+  const accentInk = luminance > 0.55 ? hslToHex(hue, 30, 8) : hslToHex(hue, 15, 94);
+  const declarations = [...DARK_RAMP, ...LIGHT_RAMP]
+    .map(({ key, s, l }) => `${key}: ${hslToHex(hue, s, l)};`)
+    .join(" ");
   // Two rules: an unconditional `--dynamic-accent-preview`, which App.css's
   // swatch picker reads for the Dynamic option's own preview dot regardless
   // of which theme is actually active (so it can be previewed before being
-  // selected), and the `[data-theme="dynamic"]` accent override, which only
+  // selected), and the `[data-theme="dynamic"]` palette override, which only
   // takes effect once Dynamic actually is the active theme.
   return `:root { --dynamic-accent-preview: ${hex}; } `
-    + `:root[data-theme="dynamic"] { --ui-accent: ${hex}; --ui-accent-ink: ${ink}; `
-    + `--ui-accent-soft: color-mix(in srgb, ${hex} 16%, transparent); }`;
+    + `:root[data-theme="dynamic"] { ${declarations} --accent: ${hex}; --accent-ink: ${accentInk}; }`;
 }
 
 function applyDynamicStyle(css: string): void {
