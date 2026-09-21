@@ -279,14 +279,23 @@ export async function refreshDynamicAccent(force = false): Promise<void> {
  * is running, not just at launch — there's no OS-level "wallpaper changed"
  * event this reaches for cross-platform, so it polls instead: a plain
  * interval, plus an immediate check on window focus so switching back to
- * the app after changing wallpapers elsewhere doesn't sit stale for up to a
- * full interval. Call once from the main window only (see
- * refreshDynamicAccent's own doc comment for why); safe to call
- * unconditionally regardless of which preset is actually active, same as
- * refreshDynamicAccent itself.
+ * the app after changing wallpapers elsewhere doesn't sit stale.
+ *
+ * 2 seconds, not something more conservative like 60s: each tick is a cheap
+ * signature check (wallpaper.rs's wallpaper_signature — a path + mtime, no
+ * image decode) running on Tauri's blocking-executor thread pool
+ * (wallpaper.rs's spawn_blocking), not the UI thread, so polling often costs
+ * nothing the user can feel; the wallpaper's real color only gets
+ * re-sampled on the rare tick where that signature actually changed. This
+ * is deliberately snappy — a user who just changed their wallpaper wants to
+ * see the theme follow within a couple seconds, not wonder if it's stuck.
+ *
+ * Call once from the main window only (see refreshDynamicAccent's own doc
+ * comment for why); safe to call unconditionally regardless of which preset
+ * is actually active, same as refreshDynamicAccent itself.
  */
 export function startDynamicAccentWatcher(): void {
-  const POLL_MS = 60_000;
+  const POLL_MS = 2_000;
   window.setInterval(() => void refreshDynamicAccent(), POLL_MS);
   window.addEventListener("focus", () => void refreshDynamicAccent());
 }
