@@ -15,6 +15,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import type { ResourceMonitorData } from "../hooks/use-resource-monitor";
 import { getThemeState, saveThemeState, THEME_PRESETS, type ThemeState } from "../lib/themes";
+import { applyWindowOpacity, getWindowOpacity, saveWindowOpacity } from "../lib/window-opacity";
 import type { MouseConnection } from "../hooks/use-mouse-connection";
 import {
   buildStreamOverlayUrl,
@@ -68,6 +69,7 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
   const [installingUpdate, setInstallingUpdate] = useState(false);
   const [overlaySettings, setOverlaySettings] = useState<OverlaySettings>(() => getOverlaySettings());
   const [theme, setTheme] = useState<ThemeState>(() => getThemeState());
+  const [windowOpacity, setWindowOpacity] = useState<number>(() => getWindowOpacity());
   const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   const [streamOverlayEnabled, setStreamOverlayEnabled] = useState(() => isStreamOverlayEnabled());
   const [streamOverlayUrl, setStreamOverlayUrl] = useState<string | null>(null);
@@ -397,6 +399,31 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          <span class="setting-title">Window transparency</span>
+          <span class="setting-description">
+            Let the desktop show through the window — the app is already set up to be transparent, this just controls how much.
+          </span>
+        </div>
+        <div class="window-opacity-control">
+          <input
+            type="range"
+            min={40}
+            max={100}
+            step={1}
+            value={windowOpacity}
+            onInput={(event) => {
+              const value = Number(event.currentTarget.value);
+              setWindowOpacity(value);
+              applyWindowOpacity(value);
+            }}
+            onChange={(event) => saveWindowOpacity(Number(event.currentTarget.value))}
+          />
+          <span class="window-opacity-value">{windowOpacity}%</span>
         </div>
       </div>
       </div>

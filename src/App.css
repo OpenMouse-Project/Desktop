@@ -11,6 +11,11 @@
 }
 
 :root {
+  /* Window-transparency slider (Settings > Appearance, window-opacity.ts).
+   * The main window is already OS-transparent for its rounded corners; this
+   * is what actually makes that visible by letting it through the shell,
+   * sidebar, and title bar's own backgrounds — see how it's consumed below. */
+  --window-opacity: 100%;
   --ink: #09090b;
   --sidebar: #0d0d0f;
   --card: #111113;
@@ -210,7 +215,7 @@ button:focus-visible {
   align-items: center;
   height: 30px;
   flex-shrink: 0;
-  background: var(--sidebar);
+  background: color-mix(in srgb, var(--sidebar) var(--window-opacity), transparent);
   border-bottom: 1px solid var(--line);
 }
 
@@ -355,7 +360,7 @@ button:focus-visible {
   width: 100vw;
   overflow: hidden;
   border-radius: 10px;
-  background: var(--ink);
+  background: color-mix(in srgb, var(--ink) var(--window-opacity), transparent);
 }
 
 .full-desktop-view {
@@ -371,7 +376,7 @@ button:focus-visible {
 .app-sidebar {
   width: 56px;
   flex-shrink: 0;
-  background: var(--sidebar);
+  background: color-mix(in srgb, var(--sidebar) var(--window-opacity), transparent);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -2908,6 +2913,41 @@ body {
   margin: 1.5rem 0;
   border: none;
   border-top: 1px solid var(--line);
+}
+
+.window-opacity-control {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 180px;
+}
+
+.window-opacity-control input[type="range"] {
+  flex: 1;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  outline: none;
+}
+
+.window-opacity-control input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--card);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+.window-opacity-value {
+  min-width: 3.2ch;
+  text-align: right;
+  font-size: 0.82rem;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
 }
 
 .settings-section + .settings-section {

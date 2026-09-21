@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import { OverlayApp } from "./OverlayApp";
 import { initTheme, refreshDynamicAccent, startDynamicAccentWatcher } from "./lib/themes";
+import { initWindowOpacity } from "./lib/window-opacity";
 import "./App.css";
 
 // Apply the saved theme (preset + custom CSS) before first paint so there's
@@ -14,6 +15,10 @@ initTheme();
 // label check, so a single build serves both without needing a second
 // index.html or a client-side router this app otherwise has no use for.
 const isOverlay = getCurrentWindow().label === "overlay";
+
+// The opacity slider only makes sense for the main window — the overlay is
+// its own small always-on-top toast, not something a user resizes/sits in.
+if (!isOverlay) initWindowOpacity();
 
 // Re-sample the wallpaper on the main window's own launch, in case it
 // changed since the cached accent color initTheme() just applied — the
