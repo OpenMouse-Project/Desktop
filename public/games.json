@@ -90,6 +90,11 @@
       "name": "Destiny 2",
       "steamAppId": "1085660",
       "executables": ["Destiny2.exe"]
+    },{
+      "id": "wardogs",
+      "name": "WARDOGS",
+      "steamAppId": "1867240",
+      "executables": ["WardogsClient-Win64-Shipping.exe"]
     }
   ]
 }
