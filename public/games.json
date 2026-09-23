@@ -90,10 +90,13 @@
       "name": "Destiny 2",
       "steamAppId": "1085660",
       "executables": ["Destiny2.exe"]
-    },{
+    },
+    {
       "id": "wardogs",
       "name": "WARDOGS",
       "steamAppId": "1867240",
+      "artwork": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1867240/31dd6ce5538a3064749d769527656f9002a382b0/library_capsule_2x.jpg?t=1789503126",
+      "artworkFallback": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/1867240/59d4daf753bd5d982e6675f7eee363bc817c574e/header.jpg?t=1789503126",
       "executables": ["WardogsClient-Win64-Shipping.exe"]
     }
   ]
