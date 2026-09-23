@@ -1,0 +1,35 @@
+name: Purge games.json CDN cache
+
+# use-game-watcher.ts fetches games.json from jsDelivr (@main), whose edge
+# keeps serving the old copy for up to s-maxage=43200 (12h) after a push.
+# Purging right after the push makes a games.json edit live on the next app
+# launch instead of half a day later.
+on:
+  push:
+    branches: [main]
+    paths:
+      - public/games.json
+  workflow_dispatch:
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Purge jsDelivr
+        run: |
+          curl --fail --silent --show-error --retry 3 --retry-delay 5 \
+            "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@main/public/games.json"
+
+      - name: Verify CDN serves the pushed commit's file
+        run: |
+          expected=$(curl --fail --silent "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/public/games.json" | sha256sum)
+          for attempt in 1 2 3 4 5 6; do
+            actual=$(curl --fail --silent "https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@main/public/games.json" | sha256sum)
+            if [ "$expected" = "$actual" ]; then
+              echo "CDN is serving the new games.json"
+              exit 0
+            fi
+            echo "CDN still stale (attempt $attempt), waiting..."
+            sleep 10
+          done
+          echo "::warning::jsDelivr still serving a stale games.json after purge"
