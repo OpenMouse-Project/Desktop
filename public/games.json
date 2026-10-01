@@ -116,6 +116,36 @@
       "name": "PUBG",
       "steamAppId": "578080",
       "executables": ["TslGame.exe"]
+    },
+    {
+      "id": "call-of-duty",
+      "name": "Call of Duty / Warzone",
+      "steamAppId": 1938090,
+      "executables": ["cod.exe"]
+    },
+    {
+      "id": "arena-breakout-infinite",
+      "name": "Arena Breakout: Infinite",
+      "steamAppId": 2073620,
+      "executables": ["UAGame.exe"]
+    },
+    {
+      "id": "aimlabs",
+      "name": "Aimlabs",
+      "steamAppId": 714010,
+      "executables": ["AimLab_tb.exe"]
+    },
+    {
+      "id": "kovaaks",
+      "name": "KovaaK's",
+      "steamAppId": 824270,
+      "executables": ["FPSAimTrainer-Win64-Shipping.exe"]
+    },
+    {
+      "id": "roblox",
+      "name": "Roblox",
+      "artwork": "https://store-images.s-microsoft.com/image/apps.53518.13510798883386282.a1e5df65-8dd7-427c-9da9-506afa37b254.706886cc-3ee8-42ab-b3d1-2faff7915f6f",
+      "executables": ["RobloxPlayerBeta.exe"]
     }
   ]
 }
