@@ -23,7 +23,7 @@
         "transparent": true,
         "shadow": true,
         "windowEffects": {
-          "effects": ["sidebar", "mica"],
+          "effects": ["sidebar", "acrylic"],
           "radius": 10,
           "state": "followsWindowActiveState"
         }

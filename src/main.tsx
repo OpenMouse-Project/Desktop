@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
 import { OverlayApp } from "./OverlayApp";
 import { initTheme, refreshDynamicAccent, startDynamicAccentWatcher } from "./lib/themes";
-import { initPanelBlur, initWindowOpacity } from "./lib/window-opacity";
+import { initWindowOpacity } from "./lib/window-opacity";
 import "./App.css";
 
 // Apply the saved theme (preset + custom CSS) before first paint so there's
@@ -20,7 +20,6 @@ const isOverlay = getCurrentWindow().label === "overlay";
 // its own small always-on-top toast, not something a user resizes/sits in.
 if (!isOverlay) {
   initWindowOpacity();
-  initPanelBlur();
 }
 
 // Re-sample the wallpaper on the main window's own launch, in case it

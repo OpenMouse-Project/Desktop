@@ -16,10 +16,6 @@
    * is what actually makes that visible by letting it through the shell,
    * sidebar, and title bar's own backgrounds — see how it's consumed below. */
   --window-opacity: 100%;
-  /* Extra blur layered on top of the native vibrancy material (which has no
-   * adjustable radius of its own) — see window-opacity.ts's panel-blur
-   * functions and how it's consumed below. */
-  --panel-blur: 0px;
   --ink: #09090b;
   --sidebar: #0d0d0f;
   --card: #111113;
@@ -220,8 +216,6 @@ button:focus-visible {
   height: 30px;
   flex-shrink: 0;
   background: color-mix(in srgb, var(--sidebar) var(--window-opacity), transparent);
-  backdrop-filter: blur(var(--panel-blur));
-  -webkit-backdrop-filter: blur(var(--panel-blur));
   border-bottom: 1px solid var(--line);
 }
 
@@ -367,8 +361,6 @@ button:focus-visible {
   overflow: hidden;
   border-radius: 10px;
   background: color-mix(in srgb, var(--ink) var(--window-opacity), transparent);
-  backdrop-filter: blur(var(--panel-blur));
-  -webkit-backdrop-filter: blur(var(--panel-blur));
 }
 
 .full-desktop-view {
@@ -385,8 +377,6 @@ button:focus-visible {
   width: 56px;
   flex-shrink: 0;
   background: color-mix(in srgb, var(--sidebar) var(--window-opacity), transparent);
-  backdrop-filter: blur(var(--panel-blur));
-  -webkit-backdrop-filter: blur(var(--panel-blur));
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -2682,6 +2672,38 @@ body {
   position: relative;
   display: inline-block;
   width: fit-content;
+}
+
+.discord-status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--faint);
+  line-height: 1.4;
+}
+
+.discord-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.discord-status-connected {
+  color: var(--success);
+}
+
+.discord-status-connected .discord-status-dot {
+  background: var(--success);
+}
+
+.discord-status-disconnected {
+  color: var(--danger);
+}
+
+.discord-status-disconnected .discord-status-dot {
+  background: var(--danger);
 }
 
 .setting-description {

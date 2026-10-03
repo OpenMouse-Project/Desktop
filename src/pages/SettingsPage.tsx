@@ -24,11 +24,8 @@ import {
   type ThemeState,
 } from "../lib/themes";
 import {
-  applyPanelBlur,
   applyWindowOpacity,
-  getPanelBlur,
   getWindowOpacity,
-  savePanelBlur,
   saveWindowOpacity,
 } from "../lib/window-opacity";
 
@@ -79,6 +76,7 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
   const [discordEnabled, setDiscordEnabled] = useState(
     () => localStorage.getItem(DISCORD_RPC_PREFERENCE) === "true",
   );
+  const [discordConnected, setDiscordConnected] = useState<boolean | null>(null);
   const [discordError, setDiscordError] = useState("");
   const [showChangelog, setShowChangelog] = useState(false);
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
@@ -87,7 +85,6 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
   const [theme, setTheme] = useState<ThemeState>(() => getThemeState());
   const [dynamicVibrancy, setDynamicVibrancyState] = useState<number>(() => getDynamicVibrancy());
   const [windowOpacity, setWindowOpacity] = useState<number>(() => getWindowOpacity());
-  const [panelBlur, setPanelBlur] = useState<number>(() => getPanelBlur());
   const [themeEditorOpen, setThemeEditorOpen] = useState(false);
   const [streamOverlayEnabled, setStreamOverlayEnabled] = useState(() => isStreamOverlayEnabled());
   const [streamOverlayUrl, setStreamOverlayUrl] = useState<string | null>(null);
@@ -103,6 +100,15 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
     isAutostartEnabled()
       .then(setAutostartEnabled)
       .catch((error) => setAutostartError(error instanceof Error ? error.message : String(error)));
+  }, []);
+
+  // The toggle reflects the saved preference, not the live IPC connection —
+  // Discord may have been quit, or the last connect may have failed, so ask
+  // the backend for ground truth on mount (and refresh it after every toggle).
+  useEffect(() => {
+    void invoke<boolean>("discord_status")
+      .then(setDiscordConnected)
+      .catch(() => setDiscordConnected(false));
   }, []);
 
   // Restarts the server on app launch if the user had it on last session —
@@ -239,18 +245,20 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
 
     try {
       if (enabled) {
-        await invoke("enable");
+        await invoke("discord_enable");
         localStorage.setItem(DISCORD_RPC_PREFERENCE, "true");
       } else {
-        await invoke("disable");
+        await invoke("discord_disable");
         localStorage.removeItem(DISCORD_RPC_PREFERENCE);
       }
+      setDiscordConnected(await invoke<boolean>("discord_status"));
     } catch (error) {
       try {
-        await invoke("disable");
+        await invoke("discord_disable");
       } catch {
         // The original connection error is the useful message for the panel.
       }
+      setDiscordConnected(false);
       setDiscordError(
         enabled
           ? `Discord RPC is enabled but unavailable. Could not connect: ${error instanceof Error ? error.message : String(error)}`
@@ -313,6 +321,10 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
           </span>
           <span class="setting-description">
             Show your current device and game in Discord. (Requires Discord to be running.)
+          </span>
+          <span class={`discord-status discord-status-${discordConnected === null ? "unknown" : discordConnected ? "connected" : "disconnected"}`}>
+            <span class="discord-status-dot" aria-hidden="true" />
+            {discordConnected === null ? "Status unknown — toggle to check" : discordConnected ? "Connected to Discord" : "Not connected to Discord"}
           </span>
         </div>
         <label class="switch">
@@ -424,7 +436,7 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
         <div class="setting-label">
           <span class="setting-title">Window effects</span>
           <span class="setting-description">
-            Transparency, blur, and (with the Dynamic theme) color intensity — all in one place.
+            Transparency and (with the Dynamic theme) color intensity — all in one place.
           </span>
         </div>
 
@@ -449,28 +461,6 @@ export function SettingsPage({ resourceMonitor, connection }: Props) {
             </div>
             <span class="setting-description">Let a blurred view of your desktop show through the window — lower is more see-through.</span>
           </div>
-
-          <div class="window-effects-item">
-            <span class="setting-eyebrow">Blur</span>
-            <div class="window-opacity-control">
-              <input
-                type="range"
-                min={0}
-                max={80}
-                step={2}
-                value={panelBlur}
-                onInput={(event) => {
-                  const value = Number(event.currentTarget.value);
-                  setPanelBlur(value);
-                  applyPanelBlur(value);
-                }}
-                onChange={(event) => savePanelBlur(Number(event.currentTarget.value))}
-              />
-              <span class="window-opacity-value">{panelBlur}px</span>
-            </div>
-            <span class="setting-description">Extra softening on top of the window's own native blur — low is crisp and nearly transparent, high washes it into a solid frosted haze.</span>
-          </div>
-
           {theme.presetId === "dynamic" && (
             <div class="window-effects-item">
               <span class="setting-eyebrow">Vibrancy</span>

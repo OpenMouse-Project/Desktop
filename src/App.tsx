@@ -7,7 +7,7 @@ const DISCORD_RPC_PREFERENCE = "openmouse.discord-rpc.enabled";
 function App() {
   useEffect(() => {
     if (localStorage.getItem(DISCORD_RPC_PREFERENCE) === "true") {
-      void invoke("enable");
+      void invoke("discord_enable");
     }
   }, []);
 
