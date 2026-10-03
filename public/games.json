@@ -146,6 +146,11 @@
       "name": "Roblox",
       "artwork": "https://store-images.s-microsoft.com/image/apps.53518.13510798883386282.a1e5df65-8dd7-427c-9da9-506afa37b254.706886cc-3ee8-42ab-b3d1-2faff7915f6f",
       "executables": ["RobloxPlayerBeta.exe"]
+    },
+    {
+      "id": "escape-from-tarkov",
+      "name": "Escape from Tarkov",
+      "executables": ["EscapeFromTarkov.exe"]
     }
   ]
 }
