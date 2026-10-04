@@ -1,27 +1,64 @@
 // Which drivers can drive a device, and which collection they talk on, come
-// from `@openmouse/protocol` itself — its `DEVICE_DRIVERS` registry
-// (brand, supports, create, score) and its `SUPPORTED_HID_FILTERS`.
+// from the protocol libraries themselves — `@openmouse/protocol`'s
+// `DEVICE_DRIVERS` registry (brand, supports, create, score) and
+// `SUPPORTED_HID_FILTERS`, plus `@openmouse/keyboard-protocol`'s own
+// `DEVICE_DRIVERS` / `SUPPORTED_HID_FILTERS` for analog keyboards.
 //
-// This file used to carry a hand-maintained copy of all of that: 35 driver
+// This file used to carry a hand-maintained copy of all of that: driver
 // imports, brand names, candidate order, product-id exclusions, and a guessed
 // Razer control collection. It had to, because the registry matches devices
 // with `isSupported(device)`, which reads `device.collections` — and the Tauri
 // transport could not supply collections (see tauri-hid-device.ts's own docs
 // saying so). That gap is closed: src-tauri/src/hid_descriptor.rs parses each
 // interface's report descriptor and the collections reach the device object, so
-// the library's registry is authoritative here. A brand or protocol added
+// the libraries' registries are authoritative here. A brand or protocol added
 // upstream now arrives in this app with no change at all.
 
-import { DEVICE_DRIVERS } from "@openmouse/protocol/drivers/registry";
-import { SUPPORTED_HID_FILTERS, VENDOR_ID } from "@openmouse/protocol/drivers/vendors";
+import { DEVICE_DRIVERS as MOUSE_DRIVERS } from "@openmouse/protocol/drivers/registry";
+import { SUPPORTED_HID_FILTERS as MOUSE_FILTERS, VENDOR_ID as MOUSE_VENDORS } from "@openmouse/protocol/drivers/vendors";
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
+import { DEVICE_DRIVERS as KEYBOARD_DRIVERS } from "@openmouse/keyboard-protocol/drivers/registry";
+import { SUPPORTED_HID_FILTERS as KEYBOARD_FILTERS, VENDOR_ID as KEYBOARD_VENDORS } from "@openmouse/keyboard-protocol/drivers/vendors";
+import type { KeyboardStatus } from "@openmouse/keyboard-protocol/drivers/keyboard-types";
 import { TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
 
-/** The shared shape the library's driver classes implement. */
+/** Either status shape a connected device can report — mice and analog keyboards. */
+export type DeviceStatus = MouseStatus | KeyboardStatus;
+
+/**
+ * Whether a status came from a keyboard driver. Keyboards report no DPI;
+ * every mouse status carries it. A type guard so callers keep narrowing.
+ */
+export function isKeyboardStatus(status: DeviceStatus): status is KeyboardStatus {
+  return !("dpi" in status);
+}
+
+/** Every filter either protocol library declares, for vendor-id discovery. */
+const ALL_KNOWN_FILTERS: readonly HIDDeviceFilter[] = [...MOUSE_FILTERS, ...KEYBOARD_FILTERS];
+
+/** Registry brand name → vendor id, across both libraries. */
+const ALL_VENDORS: Readonly<Record<string, number>> = { ...MOUSE_VENDORS, ...KEYBOARD_VENDORS };
+
+/**
+ * The combined driver table. Keyboard drivers come first so that on a tied
+ * score the purpose-built keyboard driver wins over mouse-protocol's
+ * stage-one Wooting shim (which reports placeholder `dpi: 0` mouse fields —
+ * see keyboard-protocol's keyboard-types.ts). A keyboard the keyboard driver
+ * cannot answer still falls through to the shim below.
+ */
+interface RegistryDriver {
+  brand: string;
+  supports(device: HIDDevice): boolean;
+  create(device: HIDDevice): unknown;
+  score(device: HIDDevice): number;
+}
+const ALL_DRIVERS: readonly RegistryDriver[] = [...KEYBOARD_DRIVERS, ...MOUSE_DRIVERS];
+
+/** The shared shape the libraries' driver classes implement. */
 export interface SupportedClient {
   open(onReport?: (report: unknown) => void): Promise<void>;
   close(): Promise<void>;
-  readStatus(): Promise<MouseStatus>;
+  readStatus(): Promise<DeviceStatus>;
 }
 
 export interface BrandedCandidate {
@@ -37,11 +74,11 @@ export interface BrandedCandidate {
   preferredCollection?: { usagePage: number; usage: number };
 }
 
-/** Every vendor id the protocol library knows about, for a single HID scan. */
+/** Every vendor id either protocol library knows about, for a single HID scan. */
 export function allKnownVendorIds(): number[] {
   return [
     ...new Set(
-      SUPPORTED_HID_FILTERS.flatMap((filter) => (filter.vendorId === undefined ? [] : [filter.vendorId])),
+      ALL_KNOWN_FILTERS.flatMap((filter) => (filter.vendorId === undefined ? [] : [filter.vendorId])),
     ),
   ];
 }
@@ -69,10 +106,10 @@ function preferredCollectionFor(
   vendorId: number,
   productId: number,
 ): { usagePage: number; usage: number } | undefined {
-  const exact = SUPPORTED_HID_FILTERS.find(
+  const exact = ALL_KNOWN_FILTERS.find(
     (filter) => filter.vendorId === vendorId && filter.productId === productId,
   );
-  const brandWide = SUPPORTED_HID_FILTERS.find(
+  const brandWide = ALL_KNOWN_FILTERS.find(
     (filter) => filter.vendorId === vendorId && filter.productId === undefined,
   );
   for (const filter of [exact, brandWide]) {
@@ -84,7 +121,7 @@ function preferredCollectionFor(
 }
 
 /**
- * Every driver the library offers, in registry order, with the collection
+ * Every driver either library offers, in registry order, with the collection
  * preference its filters declare for this device. Callers keep the drivers that
  * `supports(device)` claims and order them by `score(device)` — the same
  * decision the library makes in a browser, which is why no brand list lives
@@ -99,7 +136,7 @@ function preferredCollectionFor(
  */
 export function candidatesForVendorId(vendorId: number, productId: number): BrandedCandidate[] {
   const preferredCollection = preferredCollectionFor(vendorId, productId);
-  return DEVICE_DRIVERS.map((driver) => ({
+  return ALL_DRIVERS.map((driver) => ({
     brand: driver.brand,
     create: driver.create as unknown as (device: HIDDevice) => SupportedClient | null,
     score: driver.score,
@@ -116,9 +153,9 @@ export function candidatesForVendorId(vendorId: number, productId: number): Bran
  * to the *vendor*, because on this host the collections are not always
  * available (hidapi cannot read a report descriptor on macOS, see
  * hid_descriptor.rs) and every one of those predicates needs them. The vendor
- * gate is derived from the library on both sides — `VENDOR_ID`'s keys matched
- * against the registry's brand names, normalised, since the library spells them
- * "Endgame Gear" there and `endgameGear` here.
+ * gate is derived from the libraries on both sides — `VENDOR_ID`'s keys matched
+ * against the registries' brand names, normalised, since the libraries spell
+ * them "Endgame Gear" there and `endgameGear` here.
  *
  * Trying every driver instead is not a safe fallback: CONFIRMED against real
  * hardware, where the Logitech stopped answering after all forty drivers had
@@ -141,10 +178,10 @@ export function candidatesForDevice(info: HidInterfaceInfo): BrandedCandidate[] 
   return eligible.slice().sort((a, b) => b.score(probe) - a.score(probe));
 }
 
-/** Registry brand name → the vendor ids `VENDOR_ID` lists for that brand. */
+/** Registry brand name → the vendor ids either `VENDOR_ID` lists for that brand. */
 function brandServesVendor(brand: string, vendorId: number): boolean {
   const normalise = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return Object.entries(VENDOR_ID).some(
+  return Object.entries(ALL_VENDORS).some(
     ([key, id]) => normalise(key) === normalise(brand) && id === vendorId,
   );
 }

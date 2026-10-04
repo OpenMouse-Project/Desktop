@@ -1,6 +1,13 @@
 import { useEffect, useState } from "preact/hooks";
-import { ArrowLeft, Battery, Gamepad2, Info, RefreshCw, Settings2, SlidersHorizontal, Lightbulb, Layers, MousePointerClick, Usb, Gauge, Zap, Palette } from "lucide-preact";
+import { ArrowLeft, Battery, Gamepad2, Info, Keyboard, RefreshCw, Settings2, SlidersHorizontal, Lightbulb, Layers, MousePointerClick, Usb, Gauge, Zap, Palette } from "lucide-preact";
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
+import type { KeyboardStatus } from "@openmouse/keyboard-protocol/drivers/keyboard-types";
+import { WOOTING_COMMAND } from "@openmouse/keyboard-protocol/wooting";
+import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
+import { saveWootingProfile } from "../native-hid/write";
+import { showToast } from "../lib/toast";
+import { confirmFlashOverwrite } from "../components/DeviceKeyboardShared";
+import { isKeyboardStatus } from "../native-hid/brands";
 import type { MouseConnection } from "../hooks/use-mouse-connection";
 import type { ActiveGameOverride } from "../hooks/use-game-watcher";
 import { deviceImage, deviceImageFallback } from "../native-hid/device-images";
@@ -10,6 +17,13 @@ import { DevicePerformanceTab } from "../components/DevicePerformanceTab";
 import { DeviceLightingTab } from "../components/DeviceLightingTab";
 import { DeviceAdvancedTab } from "../components/DeviceAdvancedTab";
 import { DeviceButtonsTab } from "../components/DeviceButtonsTab";
+import { DeviceKeyboardActuationTab } from "../components/DeviceKeyboardActuationTab";
+import { DeviceKeyboardRapidTriggerTab } from "../components/DeviceKeyboardRapidTriggerTab";
+import { DeviceKeyboardAdvancedKeysTab } from "../components/DeviceKeyboardAdvancedKeysTab";
+import { DeviceKeyboardRemapTab } from "../components/DeviceKeyboardRemapTab";
+import { DeviceKeyboardRgbTab } from "../components/DeviceKeyboardRgbTab";
+import { DeviceKeyboardGamepadTab } from "../components/DeviceKeyboardGamepadTab";
+import { DeviceKeyboardProfilesTab } from "../components/DeviceKeyboardProfilesTab";
 import { ConflictingAppsModal } from "../components/ConflictingAppsModal";
 import { useConflictingApps } from "../hooks/use-conflicting-apps";
 
@@ -47,9 +61,9 @@ const BRAND_FEATURES: Record<string, { icon: typeof Gauge; label: string }[]> = 
     { icon: Zap, label: "Polling Rate" },
   ],
   Wooting: [
-    { icon: Gauge, label: "DPI" },
-    { icon: Zap, label: "Polling Rate" },
+    { icon: Keyboard, label: "Analog" },
     { icon: Layers, label: "Profiles" },
+    { icon: Zap, label: "Rapid Trigger" },
   ],
   ATK: [
     { icon: Gauge, label: "DPI" },
@@ -78,10 +92,19 @@ const BRAND_FEATURES: Record<string, { icon: typeof Gauge; label: string }[]> = 
   ],
 };
 
-type DeviceTab = "overview" | "performance" | "advanced" | "lighting" | "profiles" | "buttons";
+type DeviceTab =
+  | "overview" | "performance" | "advanced" | "lighting" | "profiles" | "buttons"
+  | "actuation" | "rapidTrigger" | "advancedKeys" | "remap" | "rgb" | "gamepad";
 
 interface TabDef {
   id: DeviceTab;
+  icon: typeof SlidersHorizontal;
+  label: string;
+}
+
+type KeyboardTab = "overview" | "actuation" | "rapidTrigger" | "advancedKeys" | "remap" | "rgb" | "gamepad" | "profiles";
+interface KeyboardTabDef {
+  id: KeyboardTab;
   icon: typeof SlidersHorizontal;
   label: string;
 }
@@ -92,7 +115,7 @@ interface DetailRow {
   mono?: boolean;
 }
 
-function statusDetailRows(status: MouseStatus): DetailRow[] {
+function statusDetailRows(status: MouseStatus | KeyboardStatus): DetailRow[] {
   const rows: DetailRow[] = [];
   if (status.firmware.length > 0) {
     rows.push({ label: "Firmware", value: status.firmware.join(" · "), mono: status.firmware.length === 1 });
@@ -104,6 +127,22 @@ function statusDetailRows(status: MouseStatus): DetailRow[] {
         ? `${status.connectionType} (${status.connectionDetail})`
         : status.connectionType,
     });
+  }
+  if (isKeyboardStatus(status)) {
+    if (status.activeProfile !== null && status.activeProfile !== undefined) {
+      const name = status.profileNames[status.activeProfile];
+      rows.push({ label: "Profile", value: name ? `${status.activeProfile + 1} (${name})` : `Profile ${status.activeProfile + 1}` });
+    }
+    if (status.profileCount !== null && status.profileCount !== undefined) {
+      rows.push({ label: "Profiles", value: String(status.profileCount) });
+    }
+    if (status.layout) {
+      rows.push({ label: "Layout", value: status.layout });
+    }
+    if (status.serial) {
+      rows.push({ label: "Serial", value: status.serial, mono: true });
+    }
+    return rows;
   }
   if (status.activeProfile !== null && status.activeProfile !== undefined) {
     rows.push({
@@ -133,6 +172,38 @@ function statusDetailRows(status: MouseStatus): DetailRow[] {
   return rows;
 }
 
+// Top-level Save to Keyboard: disabled until a tab stages changes (tracked
+// via a module counter bumped by staged tabs — simple, no cross-tab store).
+// On click → blocking "overwrites onboard flash slot N" modal → confirmed
+// saveWootingProfile. RAM switch needs no modal and lives in Profiles.
+function KeyboardSaveBar({ info, status }: { info: HidInterfaceInfo; status: KeyboardStatus }) {
+  const [pending, setPending] = useState(false);
+  const slot = status.activeProfile ?? 0;
+
+  async function saveAll() {
+    const confirmed = await confirmFlashOverwrite(slot, "staged keyboard changes");
+    if (!confirmed) return;
+    setPending(true);
+    try {
+      await saveWootingProfile(info, WOOTING_COMMAND.saveKeyboardProfile, slot, true);
+      showToast(`Saved to flash slot ${slot + 1}.`, "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div class="setting-row">
+      <span class="setting-description">Staged changes save to onboard flash slot {slot + 1}.</span>
+      <button class="rescan-button" disabled={pending} onClick={() => void saveAll()}>
+        {pending ? "Saving…" : "Save to Keyboard"}
+      </button>
+    </div>
+  );
+}
+
 interface Props {
   connection: MouseConnection;
   activeGameOverride?: ActiveGameOverride | null;
@@ -153,10 +224,12 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
     setAutoRefreshPaused,
   } = connection;
   const [deviceTab, setDeviceTab] = useState<DeviceTab>("overview");
+  const [keyboardTab, setKeyboardTab] = useState<KeyboardTab>("overview");
   const { apps: conflictingApps, dismiss: dismissConflicting } = useConflictingApps();
 
   useEffect(() => {
     setDeviceTab("overview");
+    setKeyboardTab("overview");
   }, [connected?.key]);
 
   useEffect(() => {
@@ -167,6 +240,152 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
   // ── Connected device dashboard ──────────────────────────────────────
   if (view === "device" && connected) {
     const { status } = connected;
+    // Analog keyboards: read-only tabs reusing the mouse tab chrome. Each
+    // tab gates on its status field (missing → hidden tab, never guessed).
+    // Display + staging only — Apply buttons stub to the write wave, and no
+    // HID payload is invented (Save/Activate/RGB need a Wootility capture).
+    if (isKeyboardStatus(status)) {
+      const keyboardTabs: KeyboardTabDef[] = [{ id: "overview", icon: Info, label: "Overview" }];
+      // Actuation + Rapid Trigger render off the profile default (0x27 f1
+      // actuation, f2/f3/f4/f7 RT) — present whenever analogProfile
+      // answered. Advanced Keys renders off akc/mappings (live: 1 combo).
+      if (status.analogProfile) {
+        keyboardTabs.push({ id: "actuation", icon: SlidersHorizontal, label: "Actuation" });
+        keyboardTabs.push({ id: "rapidTrigger", icon: Zap, label: "Rapid Trigger" });
+      }
+      if (status.akc || status.mappings || status.dks) {
+        keyboardTabs.push({ id: "advancedKeys", icon: Settings2, label: "Advanced Keys" });
+      }
+      if (status.mappings?.mapping || status.mappings?.main || status.mappings?.function) {
+        keyboardTabs.push({ id: "remap", icon: MousePointerClick, label: "Remap" });
+      }
+      if (status.rgb?.core || status.rgb?.colors1 || status.rgb?.colors2 || status.rgb?.layer) {
+        keyboardTabs.push({ id: "rgb", icon: Lightbulb, label: "RGB" });
+      }
+      if (status.gamepad?.profile) keyboardTabs.push({ id: "gamepad", icon: Gamepad2, label: "Gamepad" });
+      if ((status.profileCount ?? status.profileNames.length) > 0 || status.diagnostics || status.analogSnapshot) {
+        keyboardTabs.push({ id: "profiles", icon: Layers, label: "Profiles" });
+      }
+      const visibleTab = keyboardTabs.some((tab) => tab.id === keyboardTab) ? keyboardTab : "overview";
+      return (
+        <section class="page page-overview">
+          <nav class="device-tabs-bar">
+            <button class="device-tab-back" onClick={back}>
+              <ArrowLeft size={13} aria-hidden="true" /> Devices
+            </button>
+            {keyboardTabs.map((tab) => (
+              <button
+                key={tab.id}
+                class={`device-tab-pill ${visibleTab === tab.id ? "active" : ""}`}
+                onClick={() => setKeyboardTab(tab.id)}
+              >
+                <tab.icon size={13} aria-hidden="true" /> {tab.label}
+              </button>
+            ))}
+          </nav>
+          <ConflictingAppsModal apps={conflictingApps} onDismissed={dismissConflicting} />
+          {visibleTab === "overview" && (
+            <>
+              <div class="device-showcase">
+                <h1 class="device-showcase-name">{status.name}</h1>
+                <p class="device-showcase-brand">{connected.brand}</p>
+                <div class="device-showcase-visual">
+                  <img
+                    class="device-showcase-image"
+                    src={deviceImage(connected.key, status.name)}
+                    onError={deviceImageFallback}
+                    alt={status.name}
+                  />
+                </div>
+                <div class="device-showcase-status">
+                  <span class="device-showcase-dot" aria-hidden="true" />
+                  Connected
+                  {status.connectionType && (
+                    <span class="device-showcase-status-detail">· {status.connectionType}</span>
+                  )}
+                </div>
+              </div>
+              <div class="info-section">
+                <span class="info-section-title">Current Status</span>
+                <div class="info-grid">
+                  <div class="info-row">
+                    <span class="info-label"><Keyboard size={11} aria-hidden="true" /> Type</span>
+                    <span class="info-value">Analog keyboard</span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">Actuation</span>
+                    <span class="info-value">
+                      {status.analogProfile?.actuationMm !== null && status.analogProfile?.actuationMm !== undefined
+                        ? `${status.analogProfile.actuationMm.toFixed(2)}mm`
+                        : "Not reported"}
+                    </span>
+                  </div>
+                  <div class="info-row">
+                    <span class="info-label">Profile</span>
+                    <span class="info-value">
+                      {status.activeProfile !== null && status.activeProfile !== undefined
+                        ? status.profileNames[status.activeProfile] ?? `Profile ${status.activeProfile + 1}`
+                        : "Default"}
+                    </span>
+                  </div>
+                  {status.connectionType && (
+                    <div class="info-row">
+                      <span class="info-label">Connection</span>
+                      <span class="info-value">
+                        {status.connectionDetail
+                          ? `${status.connectionType} (${status.connectionDetail})`
+                          : status.connectionType}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {statusDetailRows(status).length > 0 && (
+                <div class="info-section">
+                  <span class="info-section-title">Device Information</span>
+                  <div class="info-grid">
+                    <div class="info-row">
+                      <span class="info-label">Manufacturer</span>
+                      <span class="info-value">{connected.brand}</span>
+                    </div>
+                    {statusDetailRows(status).map((row) => (
+                      <div class="info-row" key={row.label}>
+                        <span class="info-label">{row.label}</span>
+                        <span class={`info-value ${row.mono ? "info-value-mono" : ""}`}>{row.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          {visibleTab === "actuation" && status.analogProfile && (
+            <DeviceKeyboardActuationTab status={status} />
+          )}
+          {visibleTab === "rapidTrigger" && status.analogProfile && (
+            <DeviceKeyboardRapidTriggerTab status={status} />
+          )}
+          {visibleTab === "advancedKeys" && (
+            <DeviceKeyboardAdvancedKeysTab status={status} />
+          )}
+          {visibleTab === "remap" && (
+            <DeviceKeyboardRemapTab status={status} onApplied={patchStatus} />
+          )}
+          {visibleTab === "rgb" && connectedInfo && (
+            <DeviceKeyboardRgbTab info={connectedInfo} status={status} onApplied={patchStatus} />
+          )}
+          {visibleTab === "gamepad" && (
+            <DeviceKeyboardGamepadTab status={status} onApplied={patchStatus} />
+          )}
+          {visibleTab === "profiles" && connectedInfo && (
+            <DeviceKeyboardProfilesTab info={connectedInfo} status={status} onApplied={patchStatus} />
+          )}
+          {visibleTab !== "overview" && connectedInfo && (
+            <KeyboardSaveBar info={connectedInfo} status={status} />
+          )}
+        </section>
+      );
+    }
     // Any driver-backed brand can now be written, not just Logitech/Razer —
     // the generic write layer (native-hid/write.ts) exposes the shared
     // setter surface across every candidate driver, and each tab gates its
@@ -174,8 +393,6 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
     // (so a brand without, say, motion sync simply doesn't get that slider).
     const canControl = connectedInfo !== null;
     const infoRows = statusDetailRows(status);
-
-    // Capability-driven tab list
     const tabs: TabDef[] = [{ id: "overview", icon: Info, label: "Overview" }];
 
     const hasPerformance = status.dpi > 0 ||
@@ -449,7 +666,7 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
             <RefreshCw size={40} class="spin" aria-hidden="true" />
           </div>
           <h2>Searching for devices</h2>
-          <p>Looking for supported mice…</p>
+          <p>Looking for supported devices…</p>
         </div>
       )}
 
@@ -483,7 +700,7 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
                   displayName={displayName}
                   features={primaryBrand ? BRAND_FEATURES[primaryBrand] : undefined}
                   state={state}
-                  battery={isConnected ? connected?.status.batteryPercent ?? null : null}
+                  battery={isConnected && connected && !isKeyboardStatus(connected.status) ? connected.status.batteryPercent : null}
                   onSelect={() => select(candidate)}
                 />
               );

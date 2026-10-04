@@ -15,8 +15,7 @@
 // within their own budgets below, the same "does it actually answer" bar
 // apply.mjs uses.
 
-import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
-import { allKnownVendorIds, candidatesForDevice } from "./brands";
+import { allKnownVendorIds, candidatesForDevice, isKeyboardStatus, type DeviceStatus } from "./brands";
 import { listHidInterfaces, TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
 import { withHidOpenLock } from "./hid-open-lock";
 
@@ -67,7 +66,7 @@ export interface ConnectedDevice {
   /** The interface this snapshot came from — `HidInterfaceInfo.key` (stable `vendorId:productId`). */
   key: string;
   brand: string;
-  status: MouseStatus;
+  status: DeviceStatus;
   /**
    * `driver` of the class that actually answered, so
    * capability questions — the sleep / low-power / debounce option lists only
@@ -77,6 +76,14 @@ export interface ConnectedDevice {
    * subset, so asking the wrong class offers values the mouse rejects.
    */
   driver: string;
+  /**
+   * DPI stops for Stream Deck cycling, captured from the class that actually
+   * answered readStatus (its own getDpiOptions, downsampled when it's a
+   * hundreds-long slider list). Stored at connect time because only the
+   * answering class knows which list the device obeys — re-deriving later
+   * from candidatesForDevice()[0] asks the wrong class.
+   */
+  dpiOptions: number[] | null;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -87,6 +94,34 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
       (error) => { clearTimeout(timer); reject(error); },
     );
   });
+}
+
+/**
+ * DPI stops the Stream Deck key cycles through, from the class that actually
+ * answered: on-device stages first, else its own getDpiOptions(). A
+ * hundreds-long 50-step list (Lamzu, Endgame WE, Finalmouse) is a slider,
+ * not stops — downsample to round values within its own ceiling.
+ */
+function dpiCycleStops(
+  status: DeviceStatus,
+  client: unknown,
+): number[] | null {
+  if (isKeyboardStatus(status)) return null;
+  if (status.dpiStages && status.dpiStages.length > 1) {
+    return [...status.dpiStages].sort((a, b) => a - b);
+  }
+  let options: number[] | null = null;
+  try {
+    const list = (client as { getDpiOptions?: () => readonly number[] } | null)?.getDpiOptions?.();
+    if (list && list.length > 1) options = [...list].sort((a, b) => a - b);
+  } catch {
+    options = null;
+  }
+  if (!options) return null;
+  if (options.length <= 16) return options;
+  const ceiling = options[options.length - 1];
+  const stops = [400, 800, 1600, 3200, 6400, 12800, 25600].filter((stop) => stop <= ceiling);
+  return stops.length > 1 ? stops : null;
 }
 
 /**
@@ -136,7 +171,7 @@ async function connectToInterfaceLocked(info: HidInterfaceInfo): Promise<Connect
       await withTimeout(client.open(), OPEN_TIMEOUT_MS, `${name}.open()`);
       const status = await withTimeout(client.readStatus(), READ_STATUS_TIMEOUT_MS, `${name}.readStatus()`);
       await client.close().catch(() => undefined);
-      return { key: info.key, brand: candidate.brand, status, driver: name };
+      return { key: info.key, brand: candidate.brand, status, driver: name, dpiOptions: dpiCycleStops(status, client) };
     } catch (error) {
       await client.close().catch(() => undefined);
       const message = error instanceof Error ? error.message : String(error);

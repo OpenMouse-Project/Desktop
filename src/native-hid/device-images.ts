@@ -93,6 +93,9 @@ const DEVICE_IMAGES: ReadonlyMap<string, string> = new Map([
   // WALLHACK K-001 analog keyboard (both enumerated vendor ids).
   ["3879:0806", "wallhack-k-001.png"],
   ["1caa:0806", "wallhack-k-001.png"],
+  // Wooting 60HE+ analog keyboard (VID 0x31e3, PID 0x1322). Served from the
+  // R2 bucket like every other render — already uploaded, no local copy.
+  ["31e3:1322", "wooting-60he-plus.png"],
   // Logitech G203 family. G203 LIGHTSYNC / PRODIGY and G102 share the same shell.
   ["046d:c084", "logitech-g203.png"],
   ["046d:c089", "logitech-g203.png"],
@@ -183,6 +186,17 @@ const ART_TARGET = 0.5;
 const ART_MAX_EXTENT = 50;
 
 /**
+ * Per-file width-cap override: wide subjects (keyboards) are width-capped at
+ * 50% into a thin strip next to height-capped mice. A wider cap here buys
+ * them presence without touching any mouse (mice never approach their width
+ * cap — e.g. the R5 Ultra's sits above 100).
+ */
+const ART_WIDTH_CAP_OVERRIDE: Readonly<Record<string, number>> = {
+  "wooting-60he-plus.png": 68,
+  "wallhack-k-001.png": 68,
+};
+
+/**
  * Where the product actually sits inside each artwork, as a fraction of the
  * canvas — precomputed offline (alpha > 24 counts as ink; a product shot's
  * last few fading pixels and any soft floor shadow don't) against the actual
@@ -255,10 +269,11 @@ const ART_BOUNDS: Readonly<Record<string, ArtBounds>> = {
   "unknown-device.png": { x: 0.2013, y: 0.138, w: 0.5975, h: 0.725, aspect: 0.631 },
   "vgn-dragonfly-f2.png": { x: 0.2547, y: 0.0373, w: 0.4907, h: 0.9254, aspect: 1 },
   "wallhack-k-001.png": { x: 0, y: 0.1622, w: 0.985, h: 0.7933, aspect: 1.7778 },
+  // 60HE+ render: near-full-bleed wide keyboard band (measured alpha bbox).
+  "wooting-60he-plus.png": { x: 0.0092, y: 0.315, w: 0.9667, h: 0.3708, aspect: 1 },
   "wlmouse-beast-g.png": { x: 0.1601, y: 0.078, w: 0.683, h: 0.837, aspect: 0.631 },
   "wlmouse-beast-max.png": { x: 0.0183, y: 0, w: 0.9634, h: 1, aspect: 0.5365 },
   "wlmouse-sword-x.png": { x: 0.2584, y: 0.0364, w: 0.4832, h: 0.9272, aspect: 1 },
-  "zaunkoenig-m3k.png": { x: 0.2375, y: 0, w: 0.525, h: 0.8413, aspect: 1 },
 };
 
 /**
@@ -269,6 +284,11 @@ const ART_BOUNDS: Readonly<Record<string, ArtBounds>> = {
  */
 export function artBounds(filename: string): ArtBounds | null {
   return ART_BOUNDS[filename] ?? null;
+}
+
+/** Per-file width cap (keyboards read wider than the default 50). */
+export function artWidthCap(filename: string): number {
+  return ART_WIDTH_CAP_OVERRIDE[filename] ?? ART_MAX_EXTENT;
 }
 
 /**
@@ -285,20 +305,38 @@ export function artBounds(filename: string): ArtBounds | null {
  * Returns null when the bounds are unknown, which leaves the caller's plain
  * `contain` behaviour in place.
  */
-export function deviceArtStyle(bounds: ArtBounds | null, target = ART_TARGET): string | null {
+export function deviceArtStyle(bounds: ArtBounds | null, target = ART_TARGET, widthCap = ART_MAX_EXTENT): string | null {
   if (!bounds) return null;
   // The subject's linear size is the square root of its *rendered* area, so
   // the canvas aspect belongs in it: a portrait canvas draws the same subject
   // fraction onto a narrower element.
   const linear = Math.sqrt(bounds.w * bounds.h * bounds.aspect);
   if (!(linear > 0)) return null;
+  // Wide subjects (keyboards: aspect × width >> height) are width-bound:
+  // sizing them by height overflows the tile horizontally the moment the
+  // tile narrows, and the container clips both edges. Capping by width
+  // keeps the whole board visible at any tile width.
+  const wide = bounds.aspect * bounds.w > bounds.h * 1.5;
+  if (wide) {
+    const width = Math.min(100, (100 * target) / linear);
+    const offsetX = (0.5 - (bounds.x + bounds.w / 2)) * 100;
+    const offsetY = (0.5 - (bounds.y + bounds.h / 2)) * 100;
+    return [
+      `width:${width.toFixed(2)}%`,
+      "height:auto",
+      "max-height:100%",
+      "left:50%",
+      "top:50%",
+      `transform:translate(-50%,-50%) translate(${offsetX.toFixed(2)}%,${offsetY.toFixed(2)}%)`,
+    ].join(";");
+  }
   // Both clamps keep the *subject* inside the box (the canvas may overflow;
   // only its transparent margins are clipped). Without the height one, a
   // narrow mouse normalised by area grows taller than the tile and loses its
   // nose and cable.
   const height = Math.min(
     (100 * target) / linear,
-    ART_MAX_EXTENT / Math.max(bounds.aspect * bounds.w, 0.01),
+    widthCap / Math.max(bounds.aspect * bounds.w, 0.01),
     ART_MAX_EXTENT / Math.max(bounds.h, 0.01),
   );
   const offsetX = (0.5 - (bounds.x + bounds.w / 2)) * 100;
@@ -366,6 +404,7 @@ function resolveDeviceImageFilename(key: string | null | undefined, displayName:
   if (/\bm-001\b/i.test(displayName)) return "wallhack-m-001.png";
   if (/\bpulsefire\s*haste\b/i.test(displayName)) return "hyperx-pulsefire-haste.png";
   if (/\bk-001\b/i.test(displayName)) return "wallhack-k-001.png";
+  if (/\bwooting\b/i.test(displayName) || /\b60he\b/i.test(displayName)) return "wooting-60he-plus.png";
   // Pulsar 4K Wireless Receiver ships with the X2 V2 4K dongle kit; the
   // receiver product id is not yet published, so match the reported name.
   if (/pulsar/i.test(displayName)) return "pulsar-x2-v2.png";

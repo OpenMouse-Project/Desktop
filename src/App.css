@@ -3659,3 +3659,318 @@ body {
   flex-wrap: wrap;
   justify-content: center;
 }
+
+/* ── Wooting keyboard tabs ──────────────────────────────────────── */
+
+.kb-map {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  user-select: none;
+}
+
+.kb-map-row {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.kb-key {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.35rem 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--control);
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.kb-key:hover {
+  background: var(--hover);
+  color: var(--bright);
+}
+
+.kb-key-badge {
+  font-size: 0.6rem;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.kb-key-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.kb-key-selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.kb-key-selected .kb-key-badge {
+  color: var(--accent-ink);
+  opacity: 0.75;
+}
+
+.kb-key-last {
+  box-shadow: 0 0 0 2px var(--warning);
+}
+
+.kb-map-hint {
+  margin: 0.75rem 0 0;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+}
+
+.kb-map-hint-empty {
+  color: var(--warning);
+}
+
+.akc-row-main {
+  gap: 1rem;
+}
+
+.akc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--control);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.akc-card:hover {
+  background: var(--hover);
+  border-color: var(--line-strong);
+}
+
+.akc-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.akc-card-kind {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--bright);
+}
+
+.akc-card-keys {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.akc-card-meta {
+  font-size: 0.76rem;
+  color: var(--dim);
+}
+
+.akc-card-warn {
+  font-size: 0.76rem;
+  color: var(--warning);
+}
+
+
+.kb-key-marked {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.kb-key-mark {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+}
+
+.kb-key-selected .kb-key-mark {
+  color: var(--accent-ink);
+}
+
+.akc-row-select {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.akc-row-select:hover .info-label {
+  color: var(--bright);
+}
+.kb-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.kb-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.kb-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--bright);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.kb-card-count {
+  font-size: 0.78rem;
+  color: var(--dim);
+}
+
+.kb-card-count strong {
+  color: var(--warning);
+}
+
+.kb-feedback {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+@media (max-width: 700px) {
+  .kb-feedback {
+    grid-template-columns: 1fr;
+  }
+}
+
+.kb-travel {
+  display: flex;
+  gap: 0.75rem;
+  align-items: stretch;
+  margin-top: 0.5rem;
+}
+
+.kb-travel-track {
+  position: relative;
+  width: 18px;
+  min-height: 120px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--control);
+  overflow: hidden;
+}
+
+.kb-travel-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--dim);
+}
+
+.kb-travel-fill-live {
+  background: var(--warning);
+}
+
+.kb-travel-marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--text);
+}
+
+.flash-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 9999;
+}
+
+.flash-confirm-dialog {
+  width: 420px;
+  max-width: 90vw;
+  padding: 1.75rem;
+  border: 1px solid var(--danger);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.flash-confirm-dialog h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--bright);
+}
+
+.flash-confirm-dialog p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--dim);
+}
+
+.flash-confirm-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
+.rescan-button-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.swatch-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0;
+}
+
+.swatch-placeholder-chip {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px dashed var(--line-strong);
+  background: var(--control);
+  flex-shrink: 0;
+}

@@ -14,10 +14,12 @@
 // Now "Back" only changes `view`; the snapshot survives until either a
 // different device connects or the user explicitly asks for a fresh read.
 
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { MouseStatus } from "@openmouse/protocol/drivers/mouse-types";
+import type { KeyboardStatus } from "@openmouse/keyboard-protocol/drivers/keyboard-types";
+import { isKeyboardStatus, type DeviceStatus } from "../native-hid/brands";
 import {
   connectToInterface,
   listCandidateInterfaces,
@@ -28,7 +30,9 @@ import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
 import { getRememberedDevice, rememberDevice, rememberDeviceName } from "../native-hid/device-store";
 import { isHidBusyError, isQueuedNotProcessedError } from "../native-hid/hid-open-lock";
 import { dismissToast, showProgressToast, showToast, updateToast } from "../lib/toast";
-import { pushStreamOverlayStatus, subscribeStreamOverlayDeviceKey } from "../lib/stream-overlay";
+import { pushStreamOverlayStatus, subscribeStreamOverlayDeviceKey, takeStreamDeckCycle } from "../lib/stream-overlay";
+import { setDpi, setPollingRate } from "../native-hid/write";
+import { setDpi as logitechSetDpi, setPollingRate as logitechSetPollingRate } from "../native-hid/logitech-actions";
 
 // How often a connected device's status re-reads itself in the background,
 // so battery/DPI/etc. drift on their own instead of only updating after an
@@ -363,9 +367,32 @@ export function useMouseConnection() {
   // A write action (setDpi, setPollingRate, ...) returns the value the
   // device actually applied — patch that straight into the cached status
   // instead of re-running the whole readStatus() walk just to see it.
-  const patchStatus = useCallback((patch: Partial<MouseStatus>) => {
-    setConnected((prev) => (prev ? { ...prev, status: { ...prev.status, ...patch } } : prev));
-  }, []);
+  // Keyboard tabs stage the same way (actuation slider, profile switcher)
+  // ahead of the write wave, so the patch accepts either status shape. A
+  // cross-kind patch — a mouse write landing on a keyboard snapshot after a
+  // transport switch — is dropped rather than corrupting the union; the next
+  // background refresh re-reads anyway.
+  //
+  // Overloads keep each caller's patch kind-checked (mouse tabs pass mouse
+  // fields, keyboard tabs pass keyboard fields) while the implementation
+  // narrows on the live snapshot kind. The spread inside each narrowed
+  // branch stays within one union member, which is what keeps the
+  // `{ ...prev.status, ...patch }` merge assignable.
+  function patchStatus(patch: Partial<MouseStatus>): void;
+  function patchStatus(patch: Partial<KeyboardStatus>): void;
+  function patchStatus(patch: Partial<DeviceStatus>): void {
+    setConnected((prev) => {
+      if (!prev) return prev;
+      if (isKeyboardStatus(prev.status)) {
+        if ("dpi" in patch) return prev;
+        const keyboardPatch = patch as Partial<KeyboardStatus>;
+        return { ...prev, status: { ...prev.status, ...keyboardPatch } };
+      }
+      if ("profileNames" in patch || "analogProfile" in patch) return prev;
+      const mousePatch = patch as Partial<MouseStatus>;
+      return { ...prev, status: { ...prev.status, ...mousePatch } };
+    });
+  }
 
   // What the device list's "Connect" click calls: if this is the device
   // already cached, just switch views — no reason to pay the walk again for
@@ -560,10 +587,14 @@ export function useMouseConnection() {
           const device = await connectToInterface(target.info);
           // Superseded by a newer walk while this one was reading.
           if (generation !== walkGenerationRef.current) return false;
-          // Same mouse? The serial settles it where the driver reports one;
-          // the product-string match already got us here otherwise.
-          const sameUnit = device.status.unitId == null || current.status.unitId == null
-            || device.status.unitId === current.status.unitId;
+          // Same device? The serial settles it where the driver reports one;
+          // the product-string match already got us here otherwise. Keyboards
+          // never hot-swap transports (always wired USB), so mixed kinds
+          // refuse the switch rather than comparing unrelated identity fields.
+          const sameUnit = isKeyboardStatus(device.status) || isKeyboardStatus(current.status)
+            ? false
+            : device.status.unitId == null || current.status.unitId == null
+              || device.status.unitId === current.status.unitId;
           if (!sameUnit) return false;
           if (expectWired && device.status.connectionType !== "Wired") return false;
           lastReadAtRef.current = Date.now();
@@ -610,8 +641,9 @@ export function useMouseConnection() {
   // window back. Keyed on the three fields the menu shows, not on `connected`
   // itself, so a patchStatus() that changes only DPI doesn't re-send it.
   const trayName = connected?.status.name ?? null;
-  const trayBattery = connected?.status.batteryPercent ?? null;
-  const trayBatteryState = connected?.status.batteryState ?? null;
+  // Keyboards report no battery cell: tray shows name only, never a stale mouse charge.
+  const trayBattery = connected && !isKeyboardStatus(connected.status) ? connected.status.batteryPercent : null;
+  const trayBatteryState = connected && !isKeyboardStatus(connected.status) ? connected.status.batteryState : null;
   useEffect(() => {
     const status = trayName === null
       ? null
@@ -637,8 +669,8 @@ export function useMouseConnection() {
   // and the OBS source said "No mouse connected" until some field happened to
   // change on the device — looking broken exactly when someone first turns
   // the feature on.
-  const overlayDpi = connected?.status.dpi ?? null;
-  const overlayPollingRateHz = connected?.status.pollingRateHz ?? null;
+  const overlayDpi = connected && !isKeyboardStatus(connected.status) ? connected.status.dpi : null;
+  const overlayPollingRateHz = connected && !isKeyboardStatus(connected.status) ? connected.status.pollingRateHz : null;
   const overlayKey = connected?.key ?? null;
   // A user with more than one mouse can pin the overlay to a specific one
   // (Settings' device picker, saved via stream-overlay.ts) instead of it
@@ -649,13 +681,92 @@ export function useMouseConnection() {
   // name/DPI/rate to next change.
   const [overlayPinnedKey, setOverlayPinnedKey] = useState<string | null>(null);
   useEffect(() => subscribeStreamOverlayDeviceKey(setOverlayPinnedKey), []);
+  // DPI stops the Stream Deck key cycles through — captured at connect time
+  // from the class that actually answered (see scan.ts's dpiCycleStops), not
+  // re-derived here: re-deriving from candidatesForDevice()[0] asks the
+  // wrong class on shared-VId devices (R5 Ultra answers via Lamzu while
+  // Attack Shark scores higher with an empty getDpiOptions()).
+  const overlayDpiOptions = connected?.dpiOptions ?? null;
+  const overlayPollingOptions = useMemo((): number[] | null => {
+    if (!connected || isKeyboardStatus(connected.status)) return null;
+    const rates = connected.status.supportedPollingRates;
+    if (!rates || rates.length < 2) return null;
+    return [...rates].sort((a, b) => a - b);
+  }, [connected?.status]);
   useEffect(() => {
     const matchesPin = overlayPinnedKey === null || overlayKey === overlayPinnedKey;
     const status = trayName === null || !matchesPin
       ? null
-      : { name: trayName, dpi: overlayDpi, pollingRateHz: overlayPollingRateHz };
+      : {
+        name: trayName,
+        dpi: overlayDpi,
+        pollingRateHz: overlayPollingRateHz,
+        batteryPercent: trayBattery,
+        batteryState: trayBatteryState ?? "Unknown",
+        dpiOptions: overlayDpiOptions,
+        pollingOptions: overlayPollingOptions,
+      };
     void pushStreamOverlayStatus(status).catch(() => {});
-  }, [trayName, overlayDpi, overlayPollingRateHz, overlayKey, overlayPinnedKey]);
+  }, [trayName, overlayDpi, overlayPollingRateHz, overlayKey, overlayPinnedKey, trayBattery, trayBatteryState, overlayDpiOptions, overlayPollingOptions]);
+
+  // Fulfills Stream Deck keypress cycles. The plugin POSTs /cycle-dpi or
+  // /cycle-polling; Rust parks `"dpi"`/`"polling"` in a one-slot buffer and
+  // this claims it, advances one stop past the live value (wrapping), and
+  // writes through the same path DevicePerformanceTab's Apply uses —
+  // Logitech via its index-resolving module, everyone else via write.ts.
+  // patchStatus() applies the device-confirmed value, which the push effect
+  // above then fans out to /status, the overlay, and the keys. Failures stay
+  // silent-ish (log line only): the key already showed a press animation,
+  // and the next poll simply still shows the old value.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void (async () => {
+        let which: string | null;
+        try {
+          which = await takeStreamDeckCycle();
+        } catch {
+          return;
+        }
+        if (which !== "dpi" && which !== "polling") return;
+        const device = connectedRef.current;
+        const info = lastCandidateRef.current?.info;
+        if (!device || !info || info.key !== device.key) return;
+        // Keyboards expose no DPI/polling-rate setter: no stops to cycle.
+        if (isKeyboardStatus(device.status)) return;
+        try {
+          if (which === "dpi") {
+            const options = overlayDpiOptions;
+            if (!options || options.length < 2) return;
+            const current = device.status.dpi;
+            const next = options.find((v) => v > current) ?? options[0];
+            const isLogitech = device.brand === "Logitech";
+            const applied = isLogitech
+              ? await logitechSetDpi(info, next)
+              : await setDpi(info, next);
+            patchStatus({ dpi: applied });
+          } else {
+            const options = overlayPollingOptions;
+            if (!options || options.length < 2) return;
+            const current = device.status.pollingRateHz;
+            const next = options.find((v) => v > current) ?? options[0];
+            if (device.status.ui?.pollingReadOnly) return;
+            const isLogitech = device.brand === "Logitech";
+            const applied = isLogitech
+              ? await logitechSetPollingRate(info, next)
+              : await setPollingRate(info, next);
+            patchStatus({ pollingRateHz: applied });
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          void invoke("log_line", {
+            line: `[streamdeck] cycle ${which} failed: ${message}`,
+          }).catch(() => {});
+          showToast(`Stream Deck: couldn't change ${which} — ${message}`, "error");
+        }
+      })();
+    }, 500);
+    return () => clearInterval(timer);
+  }, [overlayDpiOptions, overlayPollingOptions, patchStatus]);
 
   // Just switches back to the list — the snapshot stays cached (see module
   // docs above). Re-scans in the background so a newly plugged-in device

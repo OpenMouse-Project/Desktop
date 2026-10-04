@@ -12,6 +12,7 @@ import { useState } from "preact/hooks";
 import { Battery, type Gauge } from "lucide-preact";
 import {
   artBounds,
+  artWidthCap,
   deviceArtStyle,
   deviceImage,
   deviceImageFallback,
@@ -55,7 +56,7 @@ export function DeviceTile({ candidate, displayName, features, state, battery, o
   // sizing it from measurements we do not have. A failed load also stops the
   // measured style from being applied, so the placeholder is not blown up to
   // product-shot size.
-  const artStyle = artFailed ? null : deviceArtStyle(artBounds(filename));
+  const artStyle = artFailed ? null : deviceArtStyle(artBounds(filename), undefined, artWidthCap(filename));
 
   return (
     <li class={`device-card device-card--${state}`}>

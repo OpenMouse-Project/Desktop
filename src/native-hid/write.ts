@@ -235,6 +235,13 @@ export interface WritableClient {
   setFactoryReset?(): Promise<unknown>;
   // Keychron Nape
   setLayer?(layer: number): Promise<unknown>;
+  // Wooting 60HE+ (keyboard-protocol WootingHidClient — RAM-only switch/RGB,
+  // confirm-gated flash saves; NEVER 0x02/0x15/0x19/0x2B)
+  switchProfile?(slot: number): Promise<number>;
+  saveProfile?(commandId: number, slot: number, confirmed: boolean): Promise<boolean>;
+  setSingleKeyColor?(keyIndex: number, red: number, green: number, blue: number): Promise<boolean>;
+  resetRgb?(keyIndex?: number): Promise<boolean>;
+  setRgbBuffer?(colors: Uint8Array | readonly number[]): Promise<{ applied: boolean }>;
 }
 
 export type SensorMode = NonNullable<MouseStatus["sensorMode"]>;
@@ -589,4 +596,45 @@ export const setProfile = (info: HidInterfaceInfo, profile: number): Promise<unk
   withClient(info, "setProfile", async (client) => {
     if (!client.setProfile) throw new Error("setProfile not supported");
     return client.setProfile(profile);
+  });
+
+// ── Wooting 60HE+ ───────────────────────────────────────────────────────
+// RAM-only switch needs no confirm; every saveProfile call needs the caller's
+// blocking "overwrites onboard flash" modal to have passed confirmed: true —
+// the codec encoder throws without it, so an unconfirmed call fails here
+// before any HID send rather than persisting by accident.
+
+/** RAM-only profile switch (0x21/0x17/0x26 + 0x0b verify). No confirm needed. */
+export const switchWootingProfile = (info: HidInterfaceInfo, slot: number): Promise<number> =>
+  withClient(info, "switchProfile", async (client) => {
+    if (!client.switchProfile) throw new Error("switchProfile not supported");
+    return client.switchProfile(slot);
+  });
+
+/** FLASH-persisting save (0x08/0x2A/0x2F/0x35). Caller must confirm first. */
+export const saveWootingProfile = (info: HidInterfaceInfo, commandId: number, slot: number, confirmed: boolean): Promise<boolean> =>
+  withClient(info, "saveProfile", async (client) => {
+    if (!client.saveProfile) throw new Error("saveProfile not supported");
+    return client.saveProfile(commandId, slot, confirmed);
+  });
+
+/** RAM-only single-key RGB set (0x1E). */
+export const setWootingKeyColor = (info: HidInterfaceInfo, keyIndex: number, red: number, green: number, blue: number): Promise<boolean> =>
+  withClient(info, "setSingleKeyColor", async (client) => {
+    if (!client.setSingleKeyColor) throw new Error("setSingleKeyColor not supported");
+    return client.setSingleKeyColor(keyIndex, red, green, blue);
+  });
+
+/** RAM-only RGB reset (0x1F single key / 0x20 all). */
+export const resetWootingRgb = (info: HidInterfaceInfo, keyIndex?: number): Promise<boolean> =>
+  withClient(info, "resetRgb", async (client) => {
+    if (!client.resetRgb) throw new Error("resetRgb not supported");
+    return client.resetRgb(keyIndex);
+  });
+
+/** RAM-only full-board RGB buffer push (report index 5). applied:false = board kept profile RGB. */
+export const setWootingRgbBuffer = (info: HidInterfaceInfo, colors: Uint8Array | readonly number[]): Promise<{ applied: boolean }> =>
+  withClient(info, "setRgbBuffer", async (client) => {
+    if (!client.setRgbBuffer) throw new Error("setRgbBuffer not supported");
+    return client.setRgbBuffer(colors);
   });

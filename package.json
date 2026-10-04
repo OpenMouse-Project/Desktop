@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@openmouse/protocol": "https://github.com/OpenMouse-Project/mouse-protocol.git",
+    "@openmouse/keyboard-protocol": "file:../keyboard-protocol",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2",
