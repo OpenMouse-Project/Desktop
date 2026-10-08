@@ -21,6 +21,7 @@ import { DEVICE_DRIVERS as KEYBOARD_DRIVERS } from "@openmouse/keyboard-protocol
 import { SUPPORTED_HID_FILTERS as KEYBOARD_FILTERS, VENDOR_ID as KEYBOARD_VENDORS } from "@openmouse/keyboard-protocol/drivers/vendors";
 import type { KeyboardStatus } from "@openmouse/keyboard-protocol/drivers/keyboard-types";
 import { TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
+import { unsupportedKeyboardName } from "./unsupported-keyboards";
 
 /** Either status shape a connected device can report — mice and analog keyboards. */
 export type DeviceStatus = MouseStatus | KeyboardStatus;
@@ -172,9 +173,13 @@ export function candidatesForDevice(info: HidInterfaceInfo): BrandedCandidate[] 
       return false;
     }
   });
+  // A keyboard on Razer's VID can expose a mouse collection. When no keyboard
+  // driver claims it, the vendor fallback would try every Razer mouse driver.
   const eligible = claimed.length > 0
     ? claimed
-    : all.filter((candidate) => brandServesVendor(candidate.brand, info.vendorId));
+    : unsupportedKeyboardName(info) !== null
+      ? []
+      : all.filter((candidate) => brandServesVendor(candidate.brand, info.vendorId));
   return eligible.slice().sort((a, b) => b.score(probe) - a.score(probe));
 }
 

@@ -18,6 +18,7 @@
 import { allKnownVendorIds, candidatesForDevice, isKeyboardStatus, type DeviceStatus } from "./brands";
 import { listHidInterfaces, TauriHidDevice, type HidInterfaceInfo } from "./tauri-hid-device";
 import { withHidOpenLock } from "./hid-open-lock";
+import { unsupportedKeyboardName } from "./unsupported-keyboards";
 
 // `open()` never touches the wire (see TauriHidDevice.open()/LogitechHidppClient.open())
 // — it just claims the HID handle and registers a listener — so it has no
@@ -60,6 +61,16 @@ export interface CandidateInterface {
   info: HidInterfaceInfo;
   /** Brand(s) whose driver(s) might answer on this interface. */
   brands: string[];
+}
+
+export interface UnsupportedDevice {
+  key: string;
+  name: string;
+}
+
+export interface HidInventory {
+  candidates: CandidateInterface[];
+  unsupported: UnsupportedDevice[];
 }
 
 export interface ConnectedDevice {
@@ -129,13 +140,28 @@ function dpiCycleStops(
  * driver might answer on. Read-only — nothing here opens a device.
  */
 export async function listCandidateInterfaces(): Promise<CandidateInterface[]> {
+  return (await listHidInventory()).candidates;
+}
+
+/** One enumeration supplies connectable devices and identified unsupported keyboards. */
+export async function listHidInventory(): Promise<HidInventory> {
   const interfaces = await listHidInterfaces(allKnownVendorIds());
-  return interfaces
-    .map((info) => ({
-      info,
-      brands: [...new Set(candidatesForDevice(info).map((candidate) => candidate.brand))],
-    }))
-    .filter((candidate) => candidate.brands.length > 0);
+  return categorizeHidInterfaces(interfaces);
+}
+
+/** Keep unsupported keyboards visible as notices, outside the connectable list. */
+export function categorizeHidInterfaces(interfaces: readonly HidInterfaceInfo[]): HidInventory {
+  const candidates: CandidateInterface[] = [];
+  const unsupported: UnsupportedDevice[] = [];
+  for (const info of interfaces) {
+    const brands = [...new Set(candidatesForDevice(info).map((candidate) => candidate.brand))];
+    if (brands.length > 0) candidates.push({ info, brands });
+    else {
+      const name = unsupportedKeyboardName(info);
+      if (name !== null) unsupported.push({ key: info.key, name });
+    }
+  }
+  return { candidates, unsupported };
 }
 
 /**

@@ -734,6 +734,22 @@ button:focus-visible {
   line-height: 1.5;
 }
 
+.device-unsupported-notice {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+  margin: 1rem 0;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--card);
+  color: var(--dim);
+}
+
+.device-unsupported-notice > svg { flex: none; color: var(--accent); }
+.device-unsupported-notice strong { color: var(--bright); }
+.device-unsupported-notice p { margin: 0.35rem 0 0.8rem; }
+
 .full-desktop-main {
   flex: 1;
   display: flex;
