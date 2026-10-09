@@ -284,12 +284,13 @@ export function DevicePerformanceTab({ info, status, brand, onApplied, lockedBy,
       )}
 
       {/* ── DPI ──────────────────────────────────────────────────── */}
-      {/* A device whose driver cannot report a DPI value (e.g. the Attack
-          Shark X11's native channel, whose DPI command is write-only for
-          now) must not render a control whose Apply would fail with
-          "setDpi not supported". Hide the panel until it reports a real
-          DPI. */}
-      {status.dpi > 0 && (
+      {/* A device whose driver cannot report a DPI value and offers no stage
+          editor (an unwritable native channel) must not render a control
+          whose Apply would fail with "setDpi not supported". Hide the panel
+          until it reports a real DPI or a stage editor — e.g. the Attack
+          Shark X11's native channel, whose DPI command is write-only and
+          reports through its cached six-stage table. */}
+      {(status.dpi > 0 || status.ui?.dpiStageEditor != null) && (
       <div class="dpi-panel">
         <div class="dpi-panel-header">
           <div class="setting-label">
