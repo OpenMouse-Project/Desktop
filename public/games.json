@@ -151,7 +151,15 @@
       "id": "escape-from-tarkov",
       "name": "Escape from Tarkov",
       "steamAppId": 3932890,
+      "artwork": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3932890/df4e504f2a0aa246750265c44bc2578895ff043e/library_capsule_2x.jpg?t=1785782094",
+      "artworkFallback": "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/3932890/4dd12ea3b00a4f8b67bfd629f3b9abbf8d5cab05/header_alt_assets_2.jpg?t=1785782094",
       "executables": ["EscapeFromTarkov.exe"]
+    },
+    {
+      "id": "arc-raiders",
+      "name": "ARC Raiders",
+      "steamAppId": 1808500,
+      "executables": ["PioneerGame.exe"]
     }
   ]
 }
