@@ -150,6 +150,7 @@
     {
       "id": "escape-from-tarkov",
       "name": "Escape from Tarkov",
+      "steamAppId": 3932890,
       "executables": ["EscapeFromTarkov.exe"]
     }
   ]
