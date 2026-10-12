@@ -1,0 +1,81 @@
+name: Bump @openmouse/protocol
+
+# The desktop tracks the protocol repo's main branch as a git dependency
+# (see package.json), but `npm ci` installs the exact commit pinned in
+# package-lock.json — so without this job, new drivers and catalog entries
+# sit in mouse-protocol until somebody remembers to bump by hand. This floats
+# the pin to the newest protocol main once a day and opens (or refreshes) a
+# PR when it moved, with a typecheck against the new .d.ts as the gate.
+# Releases stay reproducible: release.yml keeps building via `npm ci` on
+# whatever the lockfile pins at tag time.
+#
+# Note: build-windows.yml only runs on pushes to main, so a bump PR gets no
+# compile check from it — the tsc step below is the validation, and the full
+# build runs once the PR merges.
+
+on:
+  schedule:
+    # Daily 09:00 UTC.
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Float protocol pin to latest main
+        id: bump
+        run: |
+          OLD_SHA="$(node -p "require('./package-lock.json').packages['node_modules/@openmouse/protocol'].resolved.split('#')[1]")"
+          echo "old-sha=$OLD_SHA" >> "$GITHUB_OUTPUT"
+          npm install "https://github.com/OpenMouse-Project/mouse-protocol.git" --no-audit --no-fund
+          NEW_SHA="$(node -p "require('./package-lock.json').packages['node_modules/@openmouse/protocol'].resolved.split('#')[1]")"
+          echo "new-sha=$NEW_SHA" >> "$GITHUB_OUTPUT"
+          if [ "$OLD_SHA" = "$NEW_SHA" ]; then
+            echo "protocol pin unchanged ($OLD_SHA)"
+          else
+            echo "protocol pin moved $OLD_SHA -> $NEW_SHA"
+          fi
+
+      - name: Typecheck against the new protocol
+        # Only meaningful when the pin moved; when it didn't, this just
+        # re-verifies main at low cost while the toolchain is warm.
+        # Fail-safe: if main doesn't typecheck clean, the job stops here
+        # and no bump PR goes out.
+        run: npx tsc --noEmit
+
+      - name: Open or refresh bump PR
+        if: steps.bump.outputs.old-sha != steps.bump.outputs.new-sha
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OLD_SHA: ${{ steps.bump.outputs.old-sha }}
+          NEW_SHA: ${{ steps.bump.outputs.new-sha }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B chore/bump-protocol
+          # package.json is included: npm normalizes the git spec on install
+          # (one-time cosmetic change), and npm ci requires the two in sync.
+          git add package-lock.json package.json
+          git commit -m "chore(protocol): bump @openmouse/protocol to ${NEW_SHA:0:12}"
+          git push -f origin chore/bump-protocol
+          if ! gh pr view chore/bump-protocol --json number -q .number >/dev/null 2>&1; then
+            gh pr create \
+              --head chore/bump-protocol \
+              --base main \
+              --title "chore(protocol): bump @openmouse/protocol to ${NEW_SHA:0:12}" \
+              --body "Automated daily bump of the protocol pin to latest main. Typechecked in the bump job; full build runs on merge.
+
+mouse-protocol compare: https://github.com/OpenMouse-Project/mouse-protocol/compare/${OLD_SHA}...${NEW_SHA}"
+          fi
