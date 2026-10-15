@@ -8,7 +8,6 @@ mod conflicting_apps;
 mod discord_rpc;
 mod games;
 mod hid;
-mod hid_descriptor;
 mod linux_permissions;
 mod resource_monitor;
 mod stream_overlay;
@@ -141,6 +140,8 @@ fn on_tray_icon_event(tray: &TrayIcon<Wry>, event: tauri::tray::TrayIconEvent) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    hid::init_logging();
+    discord_rpc::init_logging();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -166,6 +167,10 @@ pub fn run() {
             discord_rpc::enable,
             discord_rpc::disable,
             discord_rpc::update_activity,
+            discord_rpc::discord_enable,
+            discord_rpc::discord_disable,
+            discord_rpc::discord_update_activity,
+            discord_rpc::discord_status,
             applog::get_logs,
             applog::export_logs,
             applog::log_line,

@@ -1,109 +1,59 @@
-use parking_lot::Mutex;
+//! Tauri command wrappers around the shared `openmouse-presence` crate
+//! (`crates/openmouse-presence`), which holds the actual Rich Presence logic.
 
-use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
+use openmouse_presence::Presence;
 use tauri::State;
 
-const CLIENT_ID: &str = "1541591980281299056";
+pub use openmouse_presence::Presence as DiscordRpcState;
 
-fn build_activity(name: String, details: String, state_text: String) -> activity::Activity<'static> {
-    activity::Activity::new()
-        .name(name)
-        .details(details)
-        .state(state_text)
-        .buttons(vec![activity::Button::new(
-            "OpenMouse",
-            "https://openmouse.dev",
-        )])
-}
-
-pub struct DiscordRpcState {
-    client: Mutex<Option<DiscordIpcClient>>,
-}
-
-impl Default for DiscordRpcState {
-    fn default() -> Self {
-        Self {
-            client: Mutex::new(None),
-        }
-    }
+/// Routes the shared crate's diagnostics into the in-app log buffer.
+pub fn init_logging() {
+    let _ = openmouse_presence::LOG_SINK.set(crate::applog::log);
 }
 
 #[tauri::command]
-pub fn enable(state: State<DiscordRpcState>) -> Result<(), String> {
-    applog!("[discord] enable requested");
-    let mut rpc = state.client.lock();
-    if rpc.is_some() {
-        applog!("[discord] already connected");
-        return Ok(());
-    }
-
-    applog!("[discord] opening IPC connection for client {CLIENT_ID}");
-    let mut client = DiscordIpcClient::new(CLIENT_ID);
-    if let Err(error) = client.connect() {
-        applog!("[discord] connection failed: {error}");
-        return Err(error.to_string());
-    }
-    applog!("[discord] IPC connection established");
-
-    let (name, details) = if cfg!(debug_assertions) {
-        ("OpenMouse Dev", concat!("Dev Mode: Build ", env!("CARGO_PKG_VERSION")))
-    } else {
-        ("OpenMouse", "OpenMouse Desktop")
-    };
-    let activity = build_activity(
-        name.to_string(),
-        details.to_string(),
-        "Managing mouse settings".to_string(),
-    );
-    applog!("[discord] setting initial activity");
-    if let Err(error) = client.set_activity(activity) {
-        applog!("[discord] initial activity failed: {error}");
-        return Err(error.to_string());
-    }
-    applog!("[discord] initial activity set");
-
-    *rpc = Some(client);
-    applog!("[discord] connected");
-    Ok(())
+pub fn enable(state: State<Presence>) -> Result<(), String> {
+    state.enable()
 }
 
 #[tauri::command]
 pub fn update_activity(
-    state: State<DiscordRpcState>,
+    state: State<Presence>,
     details: String,
     state_text: String,
 ) -> Result<(), String> {
-    applog!("[discord] activity update requested: details={details:?}, state={state_text:?}");
-    let mut rpc = state.client.lock();
-    let Some(client) = rpc.as_mut() else {
-        applog!("[discord] activity update skipped: RPC is not enabled");
-        return Err("Discord RPC is not enabled".to_string());
-    };
-
-    if let Err(error) = client.set_activity(build_activity(
-        "OpenMouse".to_string(),
-        details,
-        state_text,
-    )) {
-        applog!("[discord] activity update failed: {error}");
-        return Err(error.to_string());
-    }
-    applog!("[discord] activity updated");
-    Ok(())
+    state.update_activity(details, state_text)
 }
 
 #[tauri::command]
-pub fn disable(state: State<DiscordRpcState>) -> Result<(), String> {
-    applog!("[discord] disable requested");
-    let mut rpc = state.client.lock();
-    if let Some(mut client) = rpc.take() {
-        if let Err(error) = client.close() {
-            applog!("[discord] disconnect failed: {error}");
-            return Err(error.to_string());
-        }
-        applog!("[discord] disconnected");
-    } else {
-        applog!("[discord] already disconnected");
-    }
-    Ok(())
+pub fn disable(state: State<Presence>) -> Result<(), String> {
+    state.disable()
+}
+
+// Upstream renamed these (bare `enable`/`disable` collided with the autostart
+// plugin's commands, so the toggle never reached the backend). Both spellings
+// are registered so a frontend works either side of that rename.
+
+#[tauri::command]
+pub fn discord_enable(state: State<Presence>) -> Result<(), String> {
+    state.enable()
+}
+
+#[tauri::command]
+pub fn discord_update_activity(
+    state: State<Presence>,
+    details: String,
+    state_text: String,
+) -> Result<(), String> {
+    state.update_activity(details, state_text)
+}
+
+#[tauri::command]
+pub fn discord_status(state: State<Presence>) -> bool {
+    state.is_connected()
+}
+
+#[tauri::command]
+pub fn discord_disable(state: State<Presence>) -> Result<(), String> {
+    state.disable()
 }

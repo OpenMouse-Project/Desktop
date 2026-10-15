@@ -1,0 +1,52 @@
+name: Build GPUI (Windows)
+
+# Builds the native GPUI app (gpui/) on Windows and uploads the .exe so it can
+# be downloaded and tried. It runs on every push to the `gpui` branch, by hand
+# from the Actions tab, and on pull requests that touch the GPUI app or the
+# crates it shares.
+on:
+  workflow_dispatch:
+  push:
+    branches: [gpui]
+  pull_request:
+    paths:
+      - gpui/**
+      - crates/**
+      - src/native-hid/**
+      - .github/workflows/build-gpui-windows.yml
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gpui
+
+      # gpui/build.rs bundles the protocol drivers with esbuild, so the root
+      # node_modules must exist first.
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Test
+        run: cargo test
+        working-directory: gpui
+
+      - name: Build release binary
+        run: cargo build --release
+        working-directory: gpui
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openmouse-gpui-windows
+          path: gpui/target/release/openmouse-gpui.exe
+          if-no-files-found: error

@@ -1,0 +1,10 @@
+[package]
+name = "openmouse-hid"
+version = "0.0.29"
+description = "Native HID transport shared by the Tauri and GPUI desktop apps"
+edition = "2021"
+
+[dependencies]
+hidapi = "2.6.6"
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive"] }

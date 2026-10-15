@@ -2597,9 +2597,9 @@ name = "openmouse-desktop"
 version = "0.0.29"
 dependencies = [
  "anyhow",
- "discord-rich-presence",
- "hidapi",
  "image",
+ "openmouse-hid",
+ "openmouse-presence",
  "parking_lot",
  "serde",
  "serde_json",
@@ -2612,6 +2612,23 @@ dependencies = [
  "tauri-plugin-updater",
  "tiny_http",
  "winreg 0.52.0",
+]
+
+[[package]]
+name = "openmouse-hid"
+version = "0.0.29"
+dependencies = [
+ "hidapi",
+ "parking_lot",
+ "serde",
+]
+
+[[package]]
+name = "openmouse-presence"
+version = "0.0.29"
+dependencies = [
+ "discord-rich-presence",
+ "parking_lot",
 ]
 
 [[package]]

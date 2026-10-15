@@ -1,0 +1,43 @@
+[package]
+name = "openmouse-gpui"
+version = "0.0.29"
+edition = "2021"
+
+[[bin]]
+name = "openmouse-gpui"
+path = "src/bin/main.rs"
+
+[dependencies]
+gpui-kit = "0.7"
+anyhow = "1.0"
+dirs = "6"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
+futures = "0.3.34"
+futures-timer = "3.0.4"
+openmouse-hid = { version = "0.0.29", path = "../crates/openmouse-hid" }
+rquickjs = { version = "0.14", features = ["futures"] }
+openmouse-presence = { version = "0.0.29", path = "../crates/openmouse-presence" }
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "=0.25.0"
+objc = "=0.2.7"
+
+[dev-dependencies]
+gpui-kit = "=0.7.3"
+
+[patch.crates-io]
+# Keep GPUI 0.3.9; correct source-over alpha in its macOS Metal compositor.
+gpui-pre-apple = { path = "vendor/gpui-pre-apple" }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+raw-window-handle = "0.6"
+
+# GPUI's layout and text work is very slow unoptimized (a plain scrolling page
+# pinned a CPU core in a debug build), so optimize every dependency even in dev
+# builds. The app's own crate stays unoptimized and quick to rebuild.
+[profile.dev.package."*"]
+opt-level = 3

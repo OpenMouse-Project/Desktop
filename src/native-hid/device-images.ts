@@ -25,6 +25,7 @@ const DEVICE_IMAGES: ReadonlyMap<string, string> = new Map([
   ["046d:c095", "logitech-g502-x-plus.png"],
   ["046d:c099", "logitech-g502-x.png"],
   ["046d:c0a8", "logitech-pro-x2-superstrike.png"],
+  ["046d:c0a9", "logitech-pro-x3-superstrike.png"],
   // Original G703 (0xc087) and G703 HERO wired (0xc090) share the same shell.
   ["046d:c087", "logitech-g703.png"],
   ["046d:c090", "logitech-g703.png"],
@@ -214,6 +215,7 @@ const ART_BOUNDS: Readonly<Record<string, ArtBounds>> = {
   "endgame-gear-op1-8k.png": { x: 0.3242, y: 0, w: 0.335, h: 0.8475, aspect: 1 },
   "endgame-gear-op1we.png": { x: 0.3192, y: 0.1808, w: 0.345, h: 0.6758, aspect: 1 },
   "endgame-gear-xm2-8k.png": { x: 0.3212, y: 0.0339, w: 0.3576, h: 0.9321, aspect: 1.0008 },
+  "finalmouse-slx.png": { x: 0.2786, y: 0.0529, w: 0.4429, h: 0.8929, aspect: 1 },
   "finalmouse-ulx.png": { x: 0.2714, y: 0.0543, w: 0.4571, h: 0.8914, aspect: 1 },
   "keychron-nape-pro.png": { x: 0, y: 0.0007, w: 0.9975, h: 0.9993, aspect: 0.2661 },
   "lamzu-maya-x.png": { x: 0.2583, y: 0.0369, w: 0.4834, h: 0.9261, aspect: 1.0009 },
@@ -235,6 +237,7 @@ const ART_BOUNDS: Readonly<Record<string, ArtBounds>> = {
   "logitech-mx-master-3s.png": { x: 0.0454, y: 0.0968, w: 0.8865, h: 0.8013, aspect: 0.6092 },
   "logitech-mx-master-4.png": { x: 0.0214, y: 0.0176, w: 0.9573, h: 0.9647, aspect: 0.6882 },
   "logitech-pro-x-superlight-2c.png": { x: 0.1569, y: 0.084, w: 0.6862, h: 0.833, aspect: 0.631 },
+  "logitech-pro-x3-superstrike.png": { x: 0.3388, y: 0.1301, w: 0.3224, h: 0.7403, aspect: 1.1574 },
   "logitech-pro-x2-superstrike.png": { x: 0.3952, y: 0.1299, w: 0.2102, h: 0.7405, aspect: 1.778 },
   "ninjutso-sora-v2.png": { x: 0.3187, y: 0.155, w: 0.3625, h: 0.6937, aspect: 1 },
   "ninjutso-sora-v3.png": { x: 0.3175, y: 0.1537, w: 0.3638, h: 0.6937, aspect: 1 },
@@ -349,6 +352,7 @@ function resolveDeviceImageFilename(key: string | null | undefined, displayName:
   if (/\bg502\b/i.test(displayName)) return "logitech-g502.png";
   if (/\bg703\b/i.test(displayName)) return "logitech-g703.png";
   if (/mx\s*master\s*4/i.test(displayName)) return "logitech-mx-master-4.png";
+  if (/\b(?:x\s*3|pro\s*x\s*3)\b.*superstrike/i.test(displayName)) return "logitech-pro-x3-superstrike.png";
   if (/superstrike/i.test(displayName)) return "logitech-pro-x2-superstrike.png";
   if (/superlight/i.test(displayName)) return "logitech-pro-x-superlight-2c.png";
   if (/op1we/i.test(displayName)) return "endgame-gear-op1we.png";
@@ -401,6 +405,7 @@ function resolveDeviceImageFilename(key: string | null | undefined, displayName:
   if (/\bdragonfly\s*f2\b/i.test(displayName)) return "vgn-dragonfly-f2.png";
   if (/\bmaya\s*x\b/i.test(displayName)) return "lamzu-maya-x.png";
   if (/\bf1\s*v2\b/i.test(displayName)) return "atk-f1-v2-ultra-max.png";
+  if (/\bstarlight\s*x\b/i.test(displayName)) return "finalmouse-slx.png";
   if (/\b(finalmouse|starlight|ulx)\b/i.test(displayName)) return "finalmouse-ulx.png";
   if (/\bbeast\s*max\b/i.test(displayName)) return "wlmouse-beast-max.png";
   return "unknown-device.png";

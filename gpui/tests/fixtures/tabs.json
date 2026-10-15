@@ -1,0 +1,825 @@
+{
+ "razer": {
+  "buttons": [
+   {
+    "title": "Razer \u2014 Buttons",
+    "controls": [
+     {
+      "id": "razer.button.rightClick",
+      "label": "Right Click",
+      "description": "Choose what this button sends.",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Left Click",
+        "label": "Left Click"
+       },
+       {
+        "value": "Right Click",
+        "label": "Right Click"
+       },
+       {
+        "value": "Mouse Button 4",
+        "label": "Mouse Button 4"
+       },
+       {
+        "value": "Mouse Button 5",
+        "label": "Mouse Button 5"
+       },
+       {
+        "value": "Disabled",
+        "label": "Disabled"
+       }
+      ],
+      "current": null
+     },
+     {
+      "id": "razer.button.mouse4",
+      "label": "Mouse Button 4",
+      "description": "Choose what this button sends.",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Left Click",
+        "label": "Left Click"
+       },
+       {
+        "value": "Right Click",
+        "label": "Right Click"
+       },
+       {
+        "value": "Mouse Button 4",
+        "label": "Mouse Button 4"
+       },
+       {
+        "value": "Mouse Button 5",
+        "label": "Mouse Button 5"
+       },
+       {
+        "value": "Disabled",
+        "label": "Disabled"
+       }
+      ],
+      "current": null
+     },
+     {
+      "id": "razer.button.mouse5",
+      "label": "Mouse Button 5",
+      "description": "Choose what this button sends.",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Left Click",
+        "label": "Left Click"
+       },
+       {
+        "value": "Right Click",
+        "label": "Right Click"
+       },
+       {
+        "value": "Mouse Button 4",
+        "label": "Mouse Button 4"
+       },
+       {
+        "value": "Mouse Button 5",
+        "label": "Mouse Button 5"
+       },
+       {
+        "value": "Disabled",
+        "label": "Disabled"
+       }
+      ],
+      "current": null
+     }
+    ]
+   },
+   {
+    "title": "Razer \u2014 Scroll & toggles",
+    "controls": [
+     {
+      "id": "razer.toggle.scrollUp",
+      "label": "Scroll Up",
+      "description": "Scroll Up",
+      "kind": "info",
+      "current": "Disabled"
+     },
+     {
+      "id": "razer.toggle.scrollDown",
+      "label": "Scroll Down",
+      "description": "Scroll Down",
+      "kind": "info",
+      "current": "Disabled"
+     },
+     {
+      "id": "razer.toggle.sensitivityButton",
+      "label": "Sensitivity Button",
+      "description": "Cycle Up Sensitivity Stages",
+      "kind": "info",
+      "current": "Disabled"
+     }
+    ]
+   }
+  ],
+  "advanced": [],
+  "lighting": null
+ },
+ "egg": {
+  "buttons": [
+   {
+    "title": "Endgame Gear \u2014 Buttons",
+    "controls": [
+     {
+      "id": "egg.button.0",
+      "label": "Left",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Left Click",
+        "label": "Left Click"
+       },
+       {
+        "value": "Right Click",
+        "label": "Right Click"
+       },
+       {
+        "value": "Middle Click",
+        "label": "Middle Click"
+       },
+       {
+        "value": "Back",
+        "label": "Back"
+       },
+       {
+        "value": "Forward",
+        "label": "Forward"
+       },
+       {
+        "value": "Scroll Up",
+        "label": "Scroll Up"
+       },
+       {
+        "value": "Scroll Down",
+        "label": "Scroll Down"
+       },
+       {
+        "value": "CPI Cycle",
+        "label": "CPI Cycle"
+       },
+       {
+        "value": "Disabled",
+        "label": "Disabled"
+       }
+      ],
+      "current": "Left Click"
+     },
+     {
+      "id": "egg.button.1",
+      "label": "Right",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Left Click",
+        "label": "Left Click"
+       },
+       {
+        "value": "Right Click",
+        "label": "Right Click"
+       },
+       {
+        "value": "Middle Click",
+        "label": "Middle Click"
+       },
+       {
+        "value": "Back",
+        "label": "Back"
+       },
+       {
+        "value": "Forward",
+        "label": "Forward"
+       },
+       {
+        "value": "Scroll Up",
+        "label": "Scroll Up"
+       },
+       {
+        "value": "Scroll Down",
+        "label": "Scroll Down"
+       },
+       {
+        "value": "CPI Cycle",
+        "label": "CPI Cycle"
+       },
+       {
+        "value": "Disabled",
+        "label": "Disabled"
+       }
+      ],
+      "current": "Right Click"
+     },
+     {
+      "id": "egg.button.2",
+      "label": "Middle",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Left Click",
+        "label": "Left Click"
+       },
+       {
+        "value": "Right Click",
+        "label": "Right Click"
+       },
+       {
+        "value": "Middle Click",
+        "label": "Middle Click"
+       },
+       {
+        "value": "Back",
+        "label": "Back"
+       },
+       {
+        "value": "Forward",
+        "label": "Forward"
+       },
+       {
+        "value": "Scroll Up",
+        "label": "Scroll Up"
+       },
+       {
+        "value": "Scroll Down",
+        "label": "Scroll Down"
+       },
+       {
+        "value": "CPI Cycle",
+        "label": "CPI Cycle"
+       },
+       {
+        "value": "Disabled",
+        "label": "Disabled"
+       }
+      ],
+      "current": "Middle Click"
+     },
+     {
+      "id": "egg.button.3",
+      "label": "Forward",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Left Click",
+        "label": "Left Click"
+       },
+       {
+        "value": "Right Click",
+        "label": "Right Click"
+       },
+       {
+        "value": "Middle Click",
+        "label": "Middle Click"
+       },
+       {
+        "value": "Back",
+        "label": "Back"
+       },
+       {
+        "value": "Forward",
+        "label": "Forward"
+       },
+       {
+        "value": "Scroll Up",
+        "label": "Scroll Up"
+       },
+       {
+        "value": "Scroll Down",
+        "label": "Scroll Down"
+       },
+       {
+        "value": "CPI Cycle",
+        "label": "CPI Cycle"
+       },
+       {
+        "value": "Disabled",
+        "label": "Disabled"
+       }
+      ],
+      "current": "Back"
+     },
+     {
+      "id": "egg.button.4",
+      "label": "Back",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Left Click",
+        "label": "Left Click"
+       },
+       {
+        "value": "Right Click",
+        "label": "Right Click"
+       },
+       {
+        "value": "Middle Click",
+        "label": "Middle Click"
+       },
+       {
+        "value": "Back",
+        "label": "Back"
+       },
+       {
+        "value": "Forward",
+        "label": "Forward"
+       },
+       {
+        "value": "Scroll Up",
+        "label": "Scroll Up"
+       },
+       {
+        "value": "Scroll Down",
+        "label": "Scroll Down"
+       },
+       {
+        "value": "CPI Cycle",
+        "label": "CPI Cycle"
+       },
+       {
+        "value": "Disabled",
+        "label": "Disabled"
+       }
+      ],
+      "current": "Forward"
+     },
+     {
+      "id": "egg.button.5",
+      "label": "Wheel Up",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Left Click",
+        "label": "Left Click"
+       },
+       {
+        "value": "Right Click",
+        "label": "Right Click"
+       },
+       {
+        "value": "Middle Click",
+        "label": "Middle Click"
+       },
+       {
+        "value": "Back",
+        "label": "Back"
+       },
+       {
+        "value": "Forward",
+        "label": "Forward"
+       },
+       {
+        "value": "Scroll Up",
+        "label": "Scroll Up"
+       },
+       {
+        "value": "Scroll Down",
+        "label": "Scroll Down"
+       },
+       {
+        "value": "CPI Cycle",
+        "label": "CPI Cycle"
+       },
+       {
+        "value": "Disabled",
+        "label": "Disabled"
+       }
+      ],
+      "current": null
+     },
+     {
+      "id": "egg.button.6",
+      "label": "Wheel Down",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Left Click",
+        "label": "Left Click"
+       },
+       {
+        "value": "Right Click",
+        "label": "Right Click"
+       },
+       {
+        "value": "Middle Click",
+        "label": "Middle Click"
+       },
+       {
+        "value": "Back",
+        "label": "Back"
+       },
+       {
+        "value": "Forward",
+        "label": "Forward"
+       },
+       {
+        "value": "Scroll Up",
+        "label": "Scroll Up"
+       },
+       {
+        "value": "Scroll Down",
+        "label": "Scroll Down"
+       },
+       {
+        "value": "CPI Cycle",
+        "label": "CPI Cycle"
+       },
+       {
+        "value": "Disabled",
+        "label": "Disabled"
+       }
+      ],
+      "current": null
+     }
+    ]
+   },
+   {
+    "title": "Endgame Gear \u2014 Debounce",
+    "controls": [
+     {
+      "id": "egg.debounce.0",
+      "label": "Left",
+      "kind": "choice",
+      "options": [
+       {
+        "value": 0,
+        "label": "Off"
+       },
+       {
+        "value": 1,
+        "label": "1 ms"
+       },
+       {
+        "value": 2,
+        "label": "2 ms"
+       },
+       {
+        "value": 4,
+        "label": "4 ms"
+       },
+       {
+        "value": 8,
+        "label": "8 ms"
+       },
+       {
+        "value": 12,
+        "label": "12 ms"
+       },
+       {
+        "value": 16,
+        "label": "16 ms"
+       }
+      ],
+      "current": 16
+     },
+     {
+      "id": "egg.debounce.1",
+      "label": "Right",
+      "kind": "choice",
+      "options": [
+       {
+        "value": 0,
+        "label": "Off"
+       },
+       {
+        "value": 1,
+        "label": "1 ms"
+       },
+       {
+        "value": 2,
+        "label": "2 ms"
+       },
+       {
+        "value": 4,
+        "label": "4 ms"
+       },
+       {
+        "value": 8,
+        "label": "8 ms"
+       },
+       {
+        "value": 12,
+        "label": "12 ms"
+       },
+       {
+        "value": 16,
+        "label": "16 ms"
+       }
+      ],
+      "current": 16
+     },
+     {
+      "id": "egg.debounce.2",
+      "label": "Middle",
+      "kind": "choice",
+      "options": [
+       {
+        "value": 0,
+        "label": "Off"
+       },
+       {
+        "value": 1,
+        "label": "1 ms"
+       },
+       {
+        "value": 2,
+        "label": "2 ms"
+       },
+       {
+        "value": 4,
+        "label": "4 ms"
+       },
+       {
+        "value": 8,
+        "label": "8 ms"
+       },
+       {
+        "value": 12,
+        "label": "12 ms"
+       },
+       {
+        "value": 16,
+        "label": "16 ms"
+       }
+      ],
+      "current": 8
+     },
+     {
+      "id": "egg.debounce.3",
+      "label": "Forward",
+      "kind": "choice",
+      "options": [
+       {
+        "value": 0,
+        "label": "Off"
+       },
+       {
+        "value": 1,
+        "label": "1 ms"
+       },
+       {
+        "value": 2,
+        "label": "2 ms"
+       },
+       {
+        "value": 4,
+        "label": "4 ms"
+       },
+       {
+        "value": 8,
+        "label": "8 ms"
+       },
+       {
+        "value": 12,
+        "label": "12 ms"
+       },
+       {
+        "value": 16,
+        "label": "16 ms"
+       }
+      ],
+      "current": 4
+     },
+     {
+      "id": "egg.debounce.4",
+      "label": "Back",
+      "kind": "choice",
+      "options": [
+       {
+        "value": 0,
+        "label": "Off"
+       },
+       {
+        "value": 1,
+        "label": "1 ms"
+       },
+       {
+        "value": 2,
+        "label": "2 ms"
+       },
+       {
+        "value": 4,
+        "label": "4 ms"
+       },
+       {
+        "value": 8,
+        "label": "8 ms"
+       },
+       {
+        "value": 12,
+        "label": "12 ms"
+       },
+       {
+        "value": 16,
+        "label": "16 ms"
+       }
+      ],
+      "current": 2
+     }
+    ]
+   }
+  ],
+  "advanced": [
+   {
+    "title": "Endgame Gear",
+    "controls": [
+     {
+      "id": "egg.slamclick",
+      "label": "Slamclick filter",
+      "kind": "toggle",
+      "current": true
+     },
+     {
+      "id": "egg.jitter",
+      "label": "Motion-jitter filter",
+      "kind": "toggle",
+      "current": false
+     },
+     {
+      "id": "egg.spdt.left",
+      "label": "GX switch \u2014 left button",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Off",
+        "label": "Off"
+       },
+       {
+        "value": "GX Safe",
+        "label": "GX Safe"
+       },
+       {
+        "value": "GX Speed",
+        "label": "GX Speed"
+       }
+      ],
+      "current": "Off"
+     },
+     {
+      "id": "egg.spdt.right",
+      "label": "GX switch \u2014 right button",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Off",
+        "label": "Off"
+       },
+       {
+        "value": "GX Safe",
+        "label": "GX Safe"
+       },
+       {
+        "value": "GX Speed",
+        "label": "GX Speed"
+       }
+      ],
+      "current": "GX Safe"
+     },
+     {
+      "id": "egg.cpiLevels",
+      "label": "CPI levels",
+      "kind": "choice",
+      "options": [
+       {
+        "value": 1,
+        "label": "1"
+       },
+       {
+        "value": 2,
+        "label": "2"
+       },
+       {
+        "value": 3,
+        "label": "3"
+       },
+       {
+        "value": 4,
+        "label": "4"
+       }
+      ],
+      "current": 2
+     },
+     {
+      "id": "egg.pollingDivider",
+      "label": "8K polling divider",
+      "description": "Result: 1,000 Hz",
+      "kind": "number",
+      "min": 1,
+      "max": 255,
+      "current": 8
+     }
+    ]
+   }
+  ],
+  "lighting": null
+ },
+ "nin": {
+  "buttons": [],
+  "advanced": [
+   {
+    "title": "Ninjutso",
+    "controls": [
+     {
+      "id": "nin.systemMode",
+      "label": "System mode",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Performance",
+        "label": "Performance"
+       },
+       {
+        "value": "Balanced",
+        "label": "Balanced"
+       }
+      ],
+      "current": "Performance"
+     },
+     {
+      "id": "nin.engine",
+      "label": "Optical Engine",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Standard",
+        "label": "Standard"
+       },
+       {
+        "value": "Burst",
+        "label": "Burst"
+       }
+      ],
+      "current": "Burst"
+     },
+     {
+      "id": "nin.hyperclick",
+      "label": "HyperClick",
+      "kind": "toggle",
+      "current": true
+     },
+     {
+      "id": "nin.slamclick",
+      "label": "Slam-Click",
+      "kind": "choice",
+      "options": [
+       {
+        "value": "Low",
+        "label": "Low"
+       },
+       {
+        "value": "Medium",
+        "label": "Medium"
+       },
+       {
+        "value": "High",
+        "label": "High"
+       }
+      ],
+      "current": "Medium"
+     }
+    ]
+   }
+  ],
+  "lighting": null
+ },
+ "lit": {
+  "buttons": [],
+  "advanced": [],
+  "lighting": {
+   "zone": "all",
+   "modes": [
+    "Off",
+    "Static",
+    "Breathing"
+   ],
+   "mode": "Static",
+   "color": "#00ff40",
+   "color2": null,
+   "colorModes": [
+    "Static",
+    "Breathing"
+   ],
+   "dualColorModes": [],
+   "reactiveModes": [
+    "Breathing"
+   ],
+   "speeds": [
+    1,
+    2,
+    3
+   ],
+   "speed": 2,
+   "writeOnly": false
+  }
+ },
+ "none": {
+  "buttons": [],
+  "advanced": [],
+  "lighting": null
+ }
+}
