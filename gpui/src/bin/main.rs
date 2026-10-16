@@ -50,6 +50,9 @@ fn main() {
         // There is no tray yet, so minimized is the quiet option.
         if openmouse_gpui::autostart::launched_by_os() {
             let _ = cx.update_window(handle, |_, window, _| window.minimize_window());
+            // A window that never became active reports no deactivation, so
+            // say so here or the background scans would stay at full rate.
+            openmouse_gpui::activity::ACTIVITY.set_active(false);
         } else {
             cx.activate(true);
         }

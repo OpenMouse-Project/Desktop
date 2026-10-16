@@ -61,7 +61,7 @@
 //! exclusive mode is off) has no bearing on the freeze either way.
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::LazyLock;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -312,6 +312,66 @@ const READ_POLL_TIMEOUT_MS: i32 = 10;
 /// `try_lock()` — but it now runs *after* an incoming report has been
 /// emitted, so it no longer delays report delivery by 5 ms.
 const READ_IDLE_GAP_MS: u64 = 5;
+
+/// Opt-in idle backoff for the reader threads, off unless a host calls
+/// [`set_idle_backoff`] (only the GPUI app does; the Tauri app is unchanged).
+///
+/// A held-open interface otherwise wakes about 66 times a second per reader
+/// for as long as the process runs, even with a mouse sitting untouched. With
+/// the backoff on, a reader that has seen no report and no request for
+/// [`IDLE_AFTER`] adds an [`IDLE_PARK`] wait after its usual gap, taken
+/// outside the device lock like the gap, so a writer is never held up by it.
+///
+/// Requests stay prompt: every request goes through `with_open_group`, which
+/// marks activity and unparks the readers before it writes, so the reply is
+/// read at the normal cadence rather than after a parked wait. Only an
+/// unsolicited report arriving while idle can be delayed, by at most
+/// [`IDLE_PARK`]; the OS queues it meanwhile and the reader drains it at the
+/// normal cadence from then on.
+static IDLE_BACKOFF: AtomicBool = AtomicBool::new(false);
+static LAST_ACTIVITY_MS: AtomicU64 = AtomicU64::new(0);
+static ACTIVITY_CLOCK: LazyLock<Instant> = LazyLock::new(Instant::now);
+const IDLE_AFTER: Duration = Duration::from_secs(2);
+const IDLE_PARK: Duration = Duration::from_millis(100);
+
+/// Turns the idle backoff on or off for every reader in the process.
+pub fn set_idle_backoff(enabled: bool) {
+    IDLE_BACKOFF.store(enabled, Ordering::Relaxed);
+    note_activity();
+}
+
+fn now_ms() -> u64 {
+    ACTIVITY_CLOCK.elapsed().as_millis() as u64
+}
+
+fn note_activity() {
+    LAST_ACTIVITY_MS.store(now_ms(), Ordering::Relaxed);
+}
+
+fn quiet_for_too_long(enabled: bool, now_ms: u64, last_activity_ms: u64) -> bool {
+    enabled && now_ms.saturating_sub(last_activity_ms) >= IDLE_AFTER.as_millis() as u64
+}
+
+fn readers_are_idle() -> bool {
+    quiet_for_too_long(
+        IDLE_BACKOFF.load(Ordering::Relaxed),
+        now_ms(),
+        LAST_ACTIVITY_MS.load(Ordering::Relaxed),
+    )
+}
+
+/// Marks a request as activity and cuts short any reader parked in its idle
+/// wait. A token left over from an unpark that found no sleeper only skips
+/// one idle wait later, which is harmless.
+fn wake_readers(group: &OpenGroup) {
+    if !IDLE_BACKOFF.load(Ordering::Relaxed) {
+        return;
+    }
+    note_activity();
+    for reader in &group.readers {
+        reader.thread().unpark();
+    }
+}
 
 #[derive(Clone, Serialize)]
 pub struct HidInterface {
@@ -1032,6 +1092,7 @@ fn spawn_reader(
             match read {
                 Ok(0) => {}
                 Ok(length) => {
+                    note_activity();
                     // Some backends prefix numbered reports with the report
                     // id, some don't — assume they do (report id in
                     // buffer[0]), matching the equivalent ambiguity the
@@ -1142,6 +1203,11 @@ fn spawn_reader(
             // Deliberately after the report above has been emitted and with
             // no lock held — see READ_IDLE_GAP_MS.
             thread::sleep(Duration::from_millis(READ_IDLE_GAP_MS));
+            // Quiet for a while: wait longer, still with no lock held. A request
+            // unparks this (see `wake_readers`); see `IDLE_BACKOFF`.
+            if readers_are_idle() {
+                thread::park_timeout(IDLE_PARK);
+            }
         }
     })
 }
@@ -1324,6 +1390,7 @@ fn with_open_group<T>(
     let group = map
         .get(&(vendor_id, product_id))
         .ok_or_else(|| "This HID interface is not open.".to_string())?;
+    wake_readers(group);
     operation(group)
 }
 
@@ -1528,6 +1595,19 @@ mod tests {
             outcome.expect("a contended call must return, not block"),
             Err(HID_BUSY.to_string()),
         );
+    }
+
+    /// The idle backoff is opt-in and only kicks in after a full quiet spell,
+    /// so the Tauri app (which never enables it) and any active exchange keep
+    /// the original reader cadence.
+    #[test]
+    fn readers_only_go_idle_when_enabled_and_quiet_long_enough() {
+        let after = IDLE_AFTER.as_millis() as u64;
+        assert!(!quiet_for_too_long(false, 10 * after, 0), "off unless enabled");
+        assert!(!quiet_for_too_long(true, after - 1, 0), "not quiet long enough yet");
+        assert!(quiet_for_too_long(true, after, 0));
+        assert!(!quiet_for_too_long(true, 5_000, 5_000), "fresh activity ends the idle spell");
+        assert!(!quiet_for_too_long(true, 100, 5_000), "a clock that reads earlier never counts as idle");
     }
 
     /// The reply that made a working Razer look asleep was the request echoed

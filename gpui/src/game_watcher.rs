@@ -1,6 +1,7 @@
 //! Lifetime-bound background detection. Process and install scans have separate
 //! owners so launcher I/O cannot delay the two-second running-game poll.
 
+use crate::activity::ACTIVITY;
 use crate::app::AppView;
 use crate::games::{self, Game};
 use gpui_kit::{Context, Task};
@@ -10,6 +11,11 @@ use sysinfo::{ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System, Upda
 
 const PROCESS_INTERVAL: Duration = Duration::from_secs(2);
 const INSTALL_INTERVAL: Duration = Duration::from_secs(10);
+// While the window is not active the scans slow down rather than stop: a game
+// can still launch behind the window and its profile should still apply, just
+// a few seconds later. Coming back to the window rescans straight away.
+const PROCESS_INTERVAL_INACTIVE: Duration = Duration::from_secs(10);
+const INSTALL_INTERVAL_INACTIVE: Duration = Duration::from_secs(60);
 
 /// Dropping the view drops these tasks, including any awaited background task.
 /// The foreground callbacks capture only the weak entity supplied by GPUI.
@@ -43,8 +49,13 @@ impl GameWatcher {
                 {
                     break;
                 }
-                cx.background_executor()
-                    .timer(PROCESS_INTERVAL.saturating_sub(started.elapsed()))
+                let elapsed = started.elapsed();
+                ACTIVITY
+                    .sleep(
+                        cx.background_executor(),
+                        PROCESS_INTERVAL.saturating_sub(elapsed),
+                        PROCESS_INTERVAL_INACTIVE.saturating_sub(elapsed),
+                    )
                     .await;
             }
         });
@@ -69,8 +80,13 @@ impl GameWatcher {
                 {
                     break;
                 }
-                cx.background_executor()
-                    .timer(INSTALL_INTERVAL.saturating_sub(started.elapsed()))
+                let elapsed = started.elapsed();
+                ACTIVITY
+                    .sleep(
+                        cx.background_executor(),
+                        INSTALL_INTERVAL.saturating_sub(elapsed),
+                        INSTALL_INTERVAL_INACTIVE.saturating_sub(elapsed),
+                    )
                     .await;
             }
         });

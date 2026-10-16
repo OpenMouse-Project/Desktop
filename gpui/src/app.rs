@@ -450,6 +450,13 @@ impl AppView {
             },
         );
 
+        // The background scans slow down while this window is not in front
+        // (see `activity.rs`). Only the main window reports: the game overlay
+        // never takes focus and must not count as the app being used.
+        let sub_activity = cx.observe_window_activation(window, |_this: &mut Self, window, _cx| {
+            crate::activity::ACTIVITY.set_active(window.is_window_active());
+        });
+
         let games = games::load_catalog();
         let game_watcher = crate::game_watcher::GameWatcher::start(cx);
         let mut view = Self {
@@ -478,7 +485,7 @@ impl AppView {
             control_sliders: Default::default(),
             slider_live: Default::default(),
             slider_seq: 0,
-            _subscriptions: vec![sub_opacity, sub_vibrancy],
+            _subscriptions: vec![sub_opacity, sub_vibrancy, sub_activity],
             _game_watcher: Some(game_watcher),
         };
         // The OS entry is the truth for launch-on-startup, not the saved flag.
