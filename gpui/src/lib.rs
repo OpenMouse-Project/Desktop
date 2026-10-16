@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod app;
 pub mod audio;
 pub mod changelog;

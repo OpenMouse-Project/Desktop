@@ -328,6 +328,9 @@ impl HidService {
     /// Starts the runtime thread. It loads the bundle before serving the first
     /// request, so construction itself is cheap.
     pub fn start() -> Self {
+        // Held-open interfaces otherwise wake their reader threads dozens of
+        // times a second forever; this app lets them back off while quiet.
+        core::set_idle_backoff(true);
         let (tx, rx) = mpsc::unbounded();
         let sink_tx = tx.clone();
         std::thread::Builder::new()

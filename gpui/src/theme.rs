@@ -271,7 +271,8 @@ pub fn cached_dynamic_accent() -> Option<(u8, u8, u8)> {
 }
 
 /// Poll loop keeping Dynamic in sync while the app runs (mirrors
-/// `startDynamicAccentWatcher`): 2s signature ticks, resampling + repainting
+/// `startDynamicAccentWatcher`): 2s signature ticks while Dynamic is the
+/// theme and the window is active, slower otherwise, resampling + repainting
 /// only when the signature moves. The blocking osascript spawn + image decode
 /// run on the background executor (mirrors `spawn_blocking`); the UI thread
 /// only pays for the repaint. Detached task — it ends when its view is dropped.
@@ -285,10 +286,27 @@ pub fn spawn_wallpaper_watcher(
     let window = *window;
     cx.spawn(async move |cx| {
         let mut last: Option<String> = None;
+        // Only Dynamic follows the wallpaper, and every check costs an
+        // `osascript` spawn on macOS, so any other theme just waits it out.
+        // Switching to Dynamic resamples on its own (`AppView::set_theme`),
+        // so the long wait never delays that. An inactive window also waits
+        // longer, and coming back to it checks straight away.
+        let mut dynamic = true;
         loop {
-            cx.background_executor().timer(Duration::from_secs(2)).await;
-            if view.upgrade().is_none() {
-                break;
+            let (active_for, inactive_for) = if dynamic {
+                (Duration::from_secs(2), Duration::from_secs(30))
+            } else {
+                (Duration::from_secs(30), Duration::from_secs(30))
+            };
+            crate::activity::ACTIVITY
+                .sleep(cx.background_executor(), active_for, inactive_for)
+                .await;
+            match view.update(cx, |view, _| view.theme() == ThemeChoice::Dynamic) {
+                Ok(now_dynamic) => dynamic = now_dynamic,
+                Err(_) => break,
+            }
+            if !dynamic {
+                continue;
             }
             // Cheap check first (path|mtime, no decode)...
             let signature = cx
