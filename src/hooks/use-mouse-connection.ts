@@ -22,8 +22,9 @@ import type { KeyboardStatus } from "@openmouse/keyboard-protocol/drivers/keyboa
 import { isKeyboardStatus, type DeviceStatus } from "../native-hid/brands";
 import {
   connectToInterface,
-  listCandidateInterfaces,
+  listHidInventory,
   type CandidateInterface,
+  type UnsupportedDevice,
   type ConnectedDevice,
 } from "../native-hid/scan";
 import type { HidInterfaceInfo } from "../native-hid/tauri-hid-device";
@@ -153,7 +154,7 @@ function conflictErrorLabel(apps: ConflictingApp[]): string {
 
 export type CandidateListState =
   | { status: "loading" }
-  | { status: "loaded"; candidates: CandidateInterface[] }
+  | { status: "loaded"; candidates: CandidateInterface[]; unsupported: UnsupportedDevice[] }
   | { status: "error"; message: string };
 
 /**
@@ -416,8 +417,8 @@ export function useMouseConnection() {
   const refresh = useCallback(async () => {
     setList({ status: "loading" });
     try {
-      const candidates = await listCandidateInterfaces();
-      setList({ status: "loaded", candidates });
+      const { candidates, unsupported } = await listHidInventory();
+      setList({ status: "loaded", candidates, unsupported });
       if (!autoReconnectAttempted.current && !connectedRef.current) {
         autoReconnectAttempted.current = true;
         const remembered = getRememberedDevice();
@@ -535,8 +536,9 @@ export function useMouseConnection() {
     const interval = setInterval(async () => {
       if (switchingRef.current) return;
       let candidates: CandidateInterface[];
+      let unsupported: UnsupportedDevice[];
       try {
-        candidates = await listCandidateInterfaces();
+        ({ candidates, unsupported } = await listHidInventory());
       } catch {
         return;
       }
@@ -549,7 +551,7 @@ export function useMouseConnection() {
         const back = candidates.find((c) => c.info.key === awaiting.key)
           ?? candidates.find((c) => isSiblingTransport(c.info, awaiting));
         if (back) {
-          setList((prev) => (prev.status === "loaded" ? { status: "loaded", candidates } : prev));
+          setList((prev) => (prev.status === "loaded" ? { status: "loaded", candidates, unsupported } : prev));
           // Errors stay quiet: this scan runs every few seconds and will try
           // again, so a device that is present but not answering must not
           // produce a toast per tick. The success toast still comes from
@@ -570,8 +572,10 @@ export function useMouseConnection() {
       setList((prev) => {
         if (prev.status !== "loaded") return prev;
         const same = prev.candidates.length === candidates.length
-          && prev.candidates.every((c, i) => c.info.key === candidates[i].info.key);
-        return same ? prev : { status: "loaded", candidates };
+          && prev.candidates.every((c, i) => c.info.key === candidates[i].info.key)
+          && prev.unsupported.length === unsupported.length
+          && prev.unsupported.every((device, i) => device.key === unsupported[i].key);
+        return same ? prev : { status: "loaded", candidates, unsupported };
       });
 
       const switchTo = async (target: CandidateInterface, expectWired: boolean): Promise<boolean> => {

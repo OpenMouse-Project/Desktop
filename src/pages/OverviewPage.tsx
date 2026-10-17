@@ -647,7 +647,7 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
         </div>
       )}
 
-      {list.status === "loaded" && list.candidates.length === 0 && (
+      {list.status === "loaded" && list.candidates.length === 0 && list.unsupported.length === 0 && (
         <div class="overview-empty">
           <div class="overview-empty-icon">
             <Usb size={40} aria-hidden="true" />
@@ -657,6 +657,21 @@ export function OverviewPage({ connection, activeGameOverride }: Props) {
           <button class="rescan-button rescan-button-standalone" onClick={() => void refresh()}>
             <RefreshCw size={14} /> Refresh Devices
           </button>
+        </div>
+      )}
+
+      {list.status === "loaded" && list.unsupported.length > 0 && (
+        <div class="device-unsupported-notice" role="status">
+          <Keyboard size={20} aria-hidden="true" />
+          <div>
+            <strong>{[...new Set(list.unsupported.map((device) => device.name))].join(", ")} detected</strong>
+            <p>OpenMouse can configure Wooting keyboards, but this Razer Huntsman has no keyboard driver yet.</p>
+            {list.candidates.length === 0 && (
+              <button class="rescan-button" onClick={() => void refresh()}>
+                <RefreshCw size={14} /> Refresh Devices
+              </button>
+            )}
+          </div>
         </div>
       )}
 
