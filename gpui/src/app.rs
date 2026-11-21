@@ -4060,7 +4060,9 @@ impl AppView {
         // Cached file art when prefetched, else the name-initial tile.
         // Remote `img(url)` is not used: desktop GPUI ships no HTTP client
         // (`with_http_client` is web-backend-only), so URLs would stay blank.
-        let art = match crate::games::cached_art_path(game) {
+        // `card_art_path` prefers the 400 px copy prefetch caches: GPUI never
+        // evicts decoded images, so full-size covers cost ~58 MB for the page.
+        let art = match crate::games::card_art_path(game) {
             Some(path) => div()
                 .w_full()
                 .h(px(ART_H))
