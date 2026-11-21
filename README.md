@@ -26,6 +26,15 @@ cargo test
 cargo build --release
 ```
 
+Memory and CPU figures from `cargo run` are not representative: the debug
+profile keeps roughly three times the resident memory of an optimized build.
+For profiling, build the CI profile and run that binary:
+
+```sh
+cargo build --profile ci
+./target/ci/openmouse-gpui
+```
+
 `OPENMOUSE_MOCK=slx` (or `ulx`, `x3`, comma separated; a trailing `!` hides
 real devices) lists fake devices for looking at their UI without hardware.
 
