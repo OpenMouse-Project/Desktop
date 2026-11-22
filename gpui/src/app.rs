@@ -568,28 +568,36 @@ impl AppView {
                 .default_value(settings.dynamic_vibrancy)
         });
 
-        // Live repaint on drag (mirrors `onInput` → `apply*`); persistence
-        // happens immediately too — the slider is the setting's own state,
-        // and `Settings::save` is a small synchronous file write.
+        // Live repaint on drag (mirrors `onInput` → `apply*`). `Change` fires
+        // per pixel of movement, so persistence waits for `Release`: dragging
+        // no longer does a synchronous JSON write (plus `create_dir_all`) on
+        // the UI thread at frame rate. The value is live in memory throughout,
+        // and `Release` fires on mouse-up and on track clicks.
         let sub_opacity = cx.subscribe_in(
             &opacity_slider,
             window,
             |this: &mut Self, _state, event, _window, cx| {
-                if let SliderEvent::Change(value) = event {
-                    this.settings.window_opacity = value.end();
-                    crate::theme::set_surface_opacity(value.end() / 100.0, cx);
+                let value = match event {
+                    SliderEvent::Change(value) | SliderEvent::Release(value) => value,
+                };
+                this.settings.window_opacity = value.end();
+                crate::theme::set_surface_opacity(value.end() / 100.0, cx);
+                if matches!(event, SliderEvent::Release(_)) {
                     this.settings.save();
-                    cx.notify();
                 }
+                cx.notify();
             },
         );
         let sub_vibrancy = cx.subscribe_in(
             &vibrancy_slider,
             window,
             |this: &mut Self, _state, event, window, cx| {
-                if let SliderEvent::Change(value) = event {
-                    this.settings.dynamic_vibrancy = value.end();
-                    this.repaint_theme(Some(window), cx);
+                let value = match event {
+                    SliderEvent::Change(value) | SliderEvent::Release(value) => value,
+                };
+                this.settings.dynamic_vibrancy = value.end();
+                this.repaint_theme(Some(window), cx);
+                if matches!(event, SliderEvent::Release(_)) {
                     this.settings.save();
                 }
             },
