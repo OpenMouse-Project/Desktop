@@ -4,6 +4,7 @@ use crate::theme::ThemeChoice;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::slider::{SliderEvent, SliderState};
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::input::{InputEvent, InputState, NumberInput};
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::Icon;
@@ -263,6 +264,9 @@ struct Devices {
     /// The Sensitivity card's segmented view: false = on-device stages,
     /// true = single-DPI presets.
     dpi_single: bool,
+    /// Device the Single view's rows belong to, and their current values.
+    single_dpi_device: Option<String>,
+    single_dpi_values: Vec<f64>,
     tab: DeviceTab,
     /// Stored profiles of the open Logitech device, once read (on demand).
     onboard: Option<crate::hid::OnboardProfiles>,
@@ -304,6 +308,7 @@ impl Staged {
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum DeviceTab {
     #[default]
+    Overview,
     Performance,
     Buttons,
     Lighting,
@@ -315,6 +320,7 @@ enum DeviceTab {
 impl DeviceTab {
     fn label(self) -> &'static str {
         match self {
+            DeviceTab::Overview => "Overview",
             DeviceTab::Performance => "Performance",
             DeviceTab::Buttons => "Buttons",
             DeviceTab::Lighting => "Lighting",
@@ -500,6 +506,10 @@ pub struct AppView {
     /// What a slider shows while it is being dragged, before the write lands.
     slider_live: std::collections::HashMap<String, f64>,
     slider_seq: u64,
+    /// Sensitivity Single view: a slider and typed value per preset row
+    /// (`<device>/single/<index>`); values live on `Devices::single_dpi_values`.
+    dpi_sliders: std::collections::HashMap<String, Entity<SliderState>>,
+    dpi_inputs: std::collections::HashMap<String, Entity<InputState>>,
     _subscriptions: Vec<Subscription>,
     _game_watcher: Option<crate::game_watcher::GameWatcher>,
     /// Cached ASCII background rows, keyed by their grid dimensions.
@@ -635,6 +645,8 @@ impl AppView {
             control_sliders: Default::default(),
             slider_live: Default::default(),
             slider_seq: 0,
+            dpi_sliders: Default::default(),
+            dpi_inputs: Default::default(),
             _subscriptions: vec![sub_opacity, sub_vibrancy, sub_activity],
             _game_watcher: Some(game_watcher),
             ascii_rows: Vec::new(),
@@ -665,6 +677,8 @@ impl Default for AppView {
             control_sliders: Default::default(),
             slider_live: Default::default(),
             slider_seq: 0,
+            dpi_sliders: Default::default(),
+            dpi_inputs: Default::default(),
             sidebar_collapsed: false,
             settings: Settings::default(),
             games: Vec::new(),
@@ -897,7 +911,7 @@ impl AppView {
         self.devices.selected = index;
         self.devices.staged = Staged::default();
         self.devices.unlinked_axes = false;
-        self.devices.tab = DeviceTab::Performance;
+        self.devices.tab = DeviceTab::Overview;
         self.devices.expanded = None;
         self.devices.onboard = None;
         self.devices.write_error = None;
@@ -2465,6 +2479,108 @@ impl AppView {
         }
     }
 
+    /// Seeds the Sensitivity Single view from the device's presets and mints a
+    /// slider + typed number field per row (`<device>/single/<index>`). Values
+    /// are local picks: dragging or typing only edits the row; clicking Use
+    /// writes the DPI.
+    fn ensure_single_dpi(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tile) = self.devices.tiles.get(self.devices.selected) else { return };
+        let TileStatus::Connected(r) = &tile.status else { return };
+        let Some(controls) = r.controls.as_ref() else { return };
+        let device = tile.key.clone();
+        let current = r.dpi.unwrap_or(0.0);
+        let (min, max) = (controls.dpi.min, controls.dpi.max);
+        let step = controls.dpi.step.max(1.0);
+
+        if self.devices.single_dpi_device.as_deref() != Some(device.as_str()) {
+            let mut values: Vec<f64> = controls
+                .dpi_presets
+                .iter()
+                .copied()
+                .filter(|preset| *preset >= min && *preset <= max)
+                .take(4)
+                .collect();
+            if current > 0.0 && !values.iter().any(|preset| (preset - current).abs() < 0.5) {
+                values.insert(0, current);
+            }
+            values.truncate(4);
+            while values.len() < 4 {
+                let last = values.last().copied().unwrap_or(current.max(min));
+                values.push(last);
+            }
+            self.devices.single_dpi_values = values;
+            self.devices.single_dpi_device = Some(device.clone());
+        }
+
+        for index in 0..4 {
+            let key = format!("{device}/single/{index}");
+            if self.dpi_sliders.contains_key(&key) {
+                continue;
+            }
+            let value = self.devices.single_dpi_values.get(index).copied().unwrap_or(current).clamp(min, max);
+            let slider = cx.new(|_| {
+                SliderState::new()
+                    .min(0.0)
+                    .max((max - min) as f32)
+                    .step(step as f32)
+                    .default_value((value - min) as f32)
+            });
+            let input = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .default_value(format!("{value:.0}"))
+                    .step(step)
+                    .min(min)
+                    .max(max)
+            });
+
+            let sub_slider = cx.subscribe_in(&slider, window, {
+                let key = key.clone();
+                move |this: &mut Self, _state, event: &SliderEvent, window, cx| {
+                    let raw = match event {
+                        SliderEvent::Change(value) | SliderEvent::Release(value) => value.end() as f64,
+                    };
+                    let real = (min + raw).clamp(min, max);
+                    let snapped = (min + ((real - min) / step).round() * step).clamp(min, max);
+                    if let Some(slot) = this.devices.single_dpi_values.get_mut(index) {
+                        *slot = snapped;
+                    }
+                    if let Some(input) = this.dpi_inputs.get(&key) {
+                        input.update(cx, |state, cx| {
+                            state.set_value(SharedString::from(format!("{snapped:.0}")), window, cx);
+                        });
+                    }
+                    cx.notify();
+                }
+            });
+            let sub_input = cx.subscribe_in(&input, window, {
+                let key = key.clone();
+                move |this: &mut Self, input, event: &InputEvent, window, cx| {
+                    if !matches!(event, InputEvent::Change) {
+                        return;
+                    }
+                    let Ok(raw) = input.read(cx).value().trim().parse::<f64>() else {
+                        return;
+                    };
+                    let snapped = (min + ((raw - min) / step).round() * step).clamp(min, max);
+                    if let Some(slot) = this.devices.single_dpi_values.get_mut(index) {
+                        *slot = snapped;
+                    }
+                    if let Some(slider) = this.dpi_sliders.get(&key) {
+                        slider.update(cx, |state, cx| {
+                            state.set_value((snapped - min) as f32, window, cx);
+                        });
+                    }
+                    cx.notify();
+                }
+            });
+
+            self.dpi_inputs.insert(key.clone(), input);
+            self.dpi_sliders.insert(key, slider);
+            self._subscriptions.push(sub_slider);
+            self._subscriptions.push(sub_input);
+        }
+    }
+
     /// A slider for a Buttons/Advanced/Performance control: accent-filled track
     /// and thumb, with its value in a fixed-width pill so rows line up.
     fn control_slider_row(slider: Option<Entity<SliderState>>, value: String, cx: &mut Context<Self>) -> AnyElement {
@@ -2849,6 +2965,252 @@ impl AppView {
         col.into_any_element()
     }
 
+    /// The default device tab: the handful of settings people change most
+    /// (sensitivity, polling rate, lift-off, surface), plus the device's
+    /// firmware versions and a place for the updater to land.
+    fn render_overview_tab(&self, r: &DeviceReadout, cx: &mut Context<Self>) -> AnyElement {
+        let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground;
+        let border = cx.theme().border;
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
+        let staged = &self.devices.staged;
+        let current = r.dpi.unwrap_or(0.0);
+        let (min, max, step) = r
+            .controls
+            .as_ref()
+            .map(|c| (c.dpi.min, c.dpi.max, c.dpi.step.max(1.0)))
+            .unwrap_or((10.0, 26000.0, 50.0));
+
+        let card = |title: &str| {
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .p_4()
+                .rounded_lg()
+                .border_1()
+                .border_color(border)
+                .bg(card_bg)
+                .child(
+                    div()
+                        .pb_2()
+                        .border_b_1()
+                        .border_color(Hsla { a: 0.55, ..border })
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(muted)
+                                .child(title.to_uppercase()),
+                        ),
+                )
+        };
+        let labeled = |label: &str, control: AnyElement| {
+            h_flex()
+                .items_center()
+                .justify_between()
+                .gap_4()
+                .child(div().text_sm().text_color(fg).child(label.to_string()))
+                .child(control)
+        };
+        // Chip groups read better with the label above them than squeezed
+        // beside a two-row wrap.
+        let stacked = |label: &str, control: AnyElement| {
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(div().text_sm().text_color(fg).child(label.to_string()))
+                .child(control)
+        };
+        let accent = cx.theme().primary;
+        let read_only_pill = move |label: String, selected: bool| {
+            div()
+                .px_3()
+                .py_1p5()
+                .rounded_full()
+                .border_1()
+                .text_sm()
+                .border_color(if selected { accent } else { Hsla { a: 0.55, ..border } })
+                .when(selected, |this| this.bg(Hsla { a: 0.16, ..accent }).text_color(fg))
+                .when(!selected, |this| this.text_color(muted))
+                .child(label)
+        };
+
+        let mut col = div().flex().flex_col().gap_3().flex_1().min_w_0().max_w(px(720.));
+
+        // Quick settings: only what the device reports it can do.
+        let has_dpi = r.dpi.is_some_and(|dpi| dpi > 0.0) && r.controls.is_some();
+        let has_polling = !r.polling_rates.is_empty();
+        let has_lod = !r.lod_options.is_empty();
+        let has_surface = r.surface.is_some()
+            && r.controls.as_ref().is_some_and(|c| !c.surface_modes.is_empty());
+        let mut quick = card("Quick settings");
+        if has_dpi {
+            let shown = staged.dpi.unwrap_or(current);
+            let dpi_down = Button::new("quick-dpi-down")
+                .compact()
+                .label("−")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let base = this.devices.staged.dpi.unwrap_or(current);
+                    this.edit_dpi((base - step).clamp(min, max), None, cx);
+                }));
+            let dpi_up = Button::new("quick-dpi-up")
+                .compact()
+                .label("+")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let base = this.devices.staged.dpi.unwrap_or(current);
+                    this.edit_dpi((base + step).clamp(min, max), None, cx);
+                }));
+            let dpi_control = h_flex()
+                .gap_3()
+                .items_center()
+                .child(dpi_down)
+                .child(
+                    div()
+                        .min_w(px(92.))
+                        .text_center()
+                        .text_2xl()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(fg)
+                        .child(format!("{shown:.0}")),
+                )
+                .child(dpi_up)
+                .into_any_element();
+            quick = quick
+                .child(labeled("Sensitivity (DPI)", dpi_control))
+                .child(div().text_xs().text_color(muted).child(format!("Now {current:.0} DPI")));
+            if let Some(c) = &r.controls {
+                let mut presets = h_flex().gap_2().flex_wrap();
+                for preset in c.dpi_presets.iter().copied().filter(|p| *p >= min && *p <= max).take(6) {
+                    presets = presets.child(self.chip(
+                        format!("quick-dpi-{preset}"),
+                        format!("{preset:.0}"),
+                        (shown - preset).abs() < 0.5,
+                        cx,
+                        move |this, cx| this.edit_dpi(preset, None, cx),
+                    ));
+                }
+                quick = quick.child(presets);
+            }
+        }
+        if !r.polling_rates.is_empty() {
+            let mut row = h_flex().gap_2().flex_wrap();
+            for rate in r.polling_rates.iter().copied() {
+                let selected = staged
+                    .polling
+                    .map(|rate_hz| rate_hz == rate)
+                    .unwrap_or((r.polling_hz.unwrap_or(0.0) - rate as f64).abs() < 0.5);
+                if r.polling_read_only {
+                    row = row.child(read_only_pill(format!("{rate} Hz"), selected));
+                } else {
+                    row = row.child(self.chip(
+                        format!("quick-poll-{rate}"),
+                        format!("{rate} Hz"),
+                        selected,
+                        cx,
+                        move |this, cx| this.edit("pollingRate", serde_json::json!(rate), cx),
+                    ));
+                }
+            }
+            quick = quick.child(stacked("Polling rate", row.into_any_element()));
+        }
+        if !r.lod_options.is_empty() {
+            let chosen = staged.lod.as_deref().or(r.lod.as_deref());
+            let mut row = h_flex().gap_2().flex_wrap();
+            for option in r.lod_options.iter().filter(|o| !(r.hide_lod_low && o.as_str() == "Low")).cloned() {
+                let selected = chosen == Some(option.as_str());
+                let sent = option.clone();
+                row = row.child(self.chip(
+                    format!("quick-lod-{option}"),
+                    option,
+                    selected,
+                    cx,
+                    move |this, cx| this.edit("liftOff", serde_json::json!(sent), cx),
+                ));
+            }
+            quick = quick.child(stacked("Lift-off distance", row.into_any_element()));
+        }
+        // `surface_modes` comes from a static list in the JS adapter; only a
+        // device that reports a current mode actually has this control.
+        if has_surface {
+            if let Some(c) = &r.controls {
+                let chosen = staged.surface.as_deref().or(r.surface.as_deref());
+                let mut row = h_flex().gap_2().flex_wrap();
+                for mode in c.surface_modes.iter().cloned() {
+                    let selected = chosen == Some(mode.as_str());
+                    let sent = mode.clone();
+                    row = row.child(self.chip(
+                        format!("quick-surface-{mode}"),
+                        mode,
+                        selected,
+                        cx,
+                        move |this, cx| this.edit("surface", serde_json::json!(sent), cx),
+                    ));
+                }
+                quick = quick.child(stacked("Gaming surface", row.into_any_element()));
+            }
+        }
+        if has_dpi || has_polling || has_lod || has_surface {
+            col = col.child(quick);
+        }
+
+        // Device facts.
+        let mut device = card("Device");
+        if let Some(connection) = &r.connection {
+            device = device.child(labeled(
+                "Connection",
+                div().text_sm().text_color(fg).child(connection.clone()).into_any_element(),
+            ));
+        }
+        if let Some(battery) = r.battery {
+            device = device.child(labeled(
+                "Battery",
+                div()
+                    .text_sm()
+                    .text_color(fg)
+                    .child(format!("{battery:.0}%{}", if r.charging { " · charging" } else { "" }))
+                    .into_any_element(),
+            ));
+        }
+        if let Some(mode) = &r.mode {
+            device = device.child(labeled(
+                "Memory mode",
+                div().text_sm().text_color(fg).child(mode.clone()).into_any_element(),
+            ));
+        }
+        if r.connection.is_some() || r.battery.is_some() || r.mode.is_some() {
+            col = col.child(device);
+        }
+
+        // Firmware: only when the device reports versions; update checks land here.
+        if !r.firmware.is_empty() {
+            let mut firmware = card("Firmware");
+            for line in &r.firmware {
+                firmware = firmware.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_4()
+                        .child(div().text_sm().text_color(muted).child("Installed"))
+                        .child(div().text_sm().text_color(fg).child(line.clone())),
+                );
+            }
+            firmware = firmware
+                .child(h_flex().child(
+                    Button::new("firmware-check")
+                        .compact()
+                        .label("Check for updates")
+                        .disabled(true),
+                ))
+                .child(div().text_xs().text_color(muted).child("Firmware update checks will appear here."));
+            col = col.child(firmware);
+        }
+
+        col.into_any_element()
+    }
+
     /// The Buttons, Lighting and Advanced tabs. Controls come from the shared
     /// JS (`js/controls.ts`), so any brand's extras appear without Rust knowing them.
     fn render_extra_tab(&self, r: &DeviceReadout, cx: &mut Context<Self>) -> AnyElement {
@@ -3113,35 +3475,68 @@ impl AppView {
             .child(header);
 
         if single {
-            // The mouse's own presets (plus its current DPI when that is not on
-            // the list), one clickable row each; the current one is ticked.
-            let mut presets: Vec<f64> = r
+            // Local picks: the typed field and slider edit a row; Use writes it.
+            let (min, max) = r
                 .controls
                 .as_ref()
-                .map(|c| {
-                    c.dpi_presets
-                        .iter()
-                        .copied()
-                        .filter(|p| *p >= c.dpi.min && *p <= c.dpi.max)
-                        .collect()
-                })
-                .unwrap_or_default();
-            if !presets.iter().any(|p| (p - current).abs() < 0.5) && current > 0.0 {
-                presets.insert(0, current);
+                .map(|c| (c.dpi.min, c.dpi.max))
+                .unwrap_or((10.0, 26000.0));
+            let mut values = self.devices.single_dpi_values.clone();
+            if values.len() != 4 {
+                values = r
+                    .controls
+                    .as_ref()
+                    .map(|c| c.dpi_presets.iter().copied().take(4).collect())
+                    .unwrap_or_default();
+                while values.len() < 4 {
+                    values.push(current.max(min));
+                }
+                values.truncate(4);
             }
-            presets.truncate(4);
-            let used = presets.iter().filter(|p| (**p - current).abs() < 0.5).count();
+            let used = values.iter().filter(|value| (**value - current).abs() < 0.5).count();
             card = card.child(
                 h_flex()
                     .justify_between()
                     .child(div().text_sm().text_color(muted).child("Presets in use"))
-                    .child(div().text_sm().text_color(muted).child(format!("{used} / {}", presets.len().max(1)))),
+                    .child(div().text_sm().text_color(muted).child(format!("{used} / 4"))),
             );
-            for (index, preset) in presets.iter().copied().enumerate() {
-                let selected = (preset - current).abs() < 0.5;
+            for (index, value) in values.iter().copied().enumerate() {
+                let value = value.clamp(min, max);
+                let selected = (value - current).abs() < 0.5;
+                let key = format!("{}/single/{index}", tile.key);
+                let input = self.dpi_inputs.get(&key).cloned();
+                let slider = self.dpi_sliders.get(&key).cloned();
+                let number: AnyElement = match input {
+                    Some(state) => NumberInput::new(&state).w(px(104.)).into_any_element(),
+                    None => div()
+                        .w(px(96.))
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(Hsla { a: 0.45, ..border })
+                        .bg(Hsla { a: 0.07, ..fg })
+                        .text_sm()
+                        .text_center()
+                        .text_color(fg)
+                        .child(format!("{value:.0}"))
+                        .into_any_element(),
+                };
+                let track: AnyElement = match slider {
+                    Some(state) => div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Slider::new(&state).bg(accent).text_color(fg))
+                        .into_any_element(),
+                    None => div().flex_1().into_any_element(),
+                };
+                let use_button = Button::new(SharedString::from(format!("dpi-use-{index}")))
+                    .compact()
+                    .label(if selected { "In use" } else { "Use" })
+                    .disabled(selected)
+                    .on_click(cx.listener(move |this, _, _, cx| this.edit_dpi(value, None, cx)))
+                    .into_any_element();
                 let row = div()
-                    .id(SharedString::from(format!("dpi-preset-row-{index}")))
-                    .cursor_pointer()
                     .flex()
                     .items_center()
                     .gap_3()
@@ -3165,33 +3560,14 @@ impl AppView {
                             .child(if selected { "✓" } else { "" }),
                     )
                     .child(div().w(px(20.)).text_sm().text_color(muted).child(format!("{}", index + 1)))
-                    .child(
-                        div()
-                            .w(px(96.))
-                            .px_2()
-                            .py_1()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(Hsla { a: 0.45, ..border })
-                            .bg(Hsla { a: 0.07, ..fg })
-                            .text_sm()
-                            .text_center()
-                            .text_color(fg)
-                            .child(format!("{preset:.0}")),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_xs()
-                            .text_color(muted)
-                            .child(if selected { "In use" } else { "Click to use" }),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| this.edit_dpi(preset, None, cx)));
+                    .child(number)
+                    .child(track)
+                    .child(use_button);
                 card = card.child(row);
             }
             card = card
                 .child(div().text_xs().text_color(muted).child(
-                    "Single puts one DPI on the mouse. Pick a preset row, or use the steppers above to enter a value.",
+                    "Type a DPI or drag a row's slider to edit that pick, then Use to put it on the mouse.",
                 ))
                 .child(div().text_xs().text_color(muted).child(format!("Current {current:.0} DPI")));
             return card.into_any_element();
@@ -3386,6 +3762,7 @@ impl AppView {
         };
 
         let content: AnyElement = match &tile.status {
+            TileStatus::Connected(r) if self.devices.tab == DeviceTab::Overview => self.render_overview_tab(r, cx),
             TileStatus::Connected(r) if self.devices.tab != DeviceTab::Performance => self.render_extra_tab(r, cx),
             TileStatus::Connected(r) => {
                 let mut col = div().flex().flex_col().gap_3().flex_1().min_w_0().max_w(px(720.));
@@ -3632,6 +4009,7 @@ impl AppView {
             _ => (false, false, false, false),
         };
         let tabs: Vec<DeviceTab> = [
+            (DeviceTab::Overview, true),
             (DeviceTab::Performance, true),
             (DeviceTab::Buttons, has_buttons),
             (DeviceTab::Lighting, has_lighting),
@@ -5082,6 +5460,7 @@ fn release_row(entry: &crate::changelog::Entry, current: bool, c: PageColors) ->
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.ensure_control_sliders(window, cx);
+        self.ensure_single_dpi(window, cx);
         let pages = [Page::Overview, Page::Games, Page::Supported];
         // Kit's Root paints the translucent semantic background once.
         // Keep the app shell clear so overlapping layers do not compound alpha.
