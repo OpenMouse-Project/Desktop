@@ -47,17 +47,25 @@ function razerAndEgg(brand: string, s: any): Section[] {
         current: s.razerButtonMappings?.[c] ?? null,
       })),
     });
-    // The Tauri tab edits these as free text; shown read-only here until the
-    // app has a text field to do that with.
+    // Toggle controls only switch between their captured factory action and
+    // Disabled; they are not cross-assignable to the button map (the driver
+    // refuses those), so they get their own two-choice control.
     out.push({
       title: "Razer — Scroll & toggles",
-      controls: RAZER_TOGGLE_CONTROLS.map((c: string) => ({
-        id: `razer.toggle.${c}`,
-        label: (RAZER_TOGGLE_CONTROL_INFO as any)[c].label,
-        description: (RAZER_TOGGLE_CONTROL_INFO as any)[c].enabledLabel,
-        kind: "info" as const,
-        current: String(s.razerButtonMappings?.[c] ?? "Disabled"),
-      })),
+      controls: RAZER_TOGGLE_CONTROLS.map((c) => {
+        const info = RAZER_TOGGLE_CONTROL_INFO[c];
+        return {
+          id: `razer.toggle.${c}`,
+          label: info.label,
+          description: `Sends ${info.enabledLabel} when enabled.`,
+          kind: "choice" as const,
+          options: [
+            { value: info.enabledLabel, label: info.enabledLabel },
+            { value: "Disabled", label: "Disabled" },
+          ],
+          current: s.razerButtonMappings?.[c] ?? null,
+        };
+      }),
     });
   }
   if (isEgg) {
@@ -134,6 +142,57 @@ function advanced(s: any, brand: string): Section[] {
         current: d,
       });
     }
+    // Sensor and handedness controls carry only on the v2 firmware (OP1/XM2
+    // 8K v2 and the 4K v2 wireless pair). The angle is a raw signed byte
+    // there, not degrees, so it stays a plain -127..127 number.
+    if (typeof s.eggAngleTuning === "number") {
+      c.push({
+        id: "egg.angle",
+        label: "Sensor angle",
+        description: "Raw firmware value; 0 is neutral. Not a degree measurement.",
+        kind: "number",
+        min: -127,
+        max: 127,
+        step: 1,
+        current: s.eggAngleTuning,
+      });
+    }
+    if (Array.isArray(s.eggLodOptions) && s.eggLodOptions.length > 0 && typeof s.eggLodIndex === "number") {
+      c.push({
+        id: "egg.lod",
+        label: "Lift-off distance",
+        kind: "choice",
+        options: (s.eggLodOptions as string[]).map((label, index) => ({ value: index, label })),
+        current: s.eggLodIndex,
+      });
+    }
+    if (typeof s.eggForceMaxFps === "boolean") {
+      c.push({
+        id: "egg.forceMaxFps",
+        label: "Force maximum sensor FPS",
+        description: "Pins the sensor to its highest frame rate.",
+        kind: "toggle",
+        current: s.eggForceMaxFps,
+      });
+    }
+    if (typeof s.eggLedLiftOffDisabled === "boolean") {
+      c.push({
+        id: "egg.ledLiftOff",
+        label: "Disable lift-off LED",
+        description: "Turns off the light that shows the sensor has lifted off the surface.",
+        kind: "toggle",
+        current: s.eggLedLiftOffDisabled,
+      });
+    }
+    if (typeof s.eggLeftHanded === "boolean") {
+      c.push({
+        id: "egg.leftHanded",
+        label: "Left-handed",
+        description: "Swaps the primary buttons. Saved button mappings are reset with the swap.",
+        kind: "toggle",
+        current: s.eggLeftHanded,
+      });
+    }
     out.push({ title: "Endgame Gear", controls: c });
   }
 
@@ -159,6 +218,23 @@ function advanced(s: any, brand: string): Section[] {
 
   if (s.sensorMode != null || s.performanceDuration != null || s.dpiLedMode != null) {
     const c: Control[] = [];
+    if (s.sensorMode != null) {
+      // Eco is about battery; High/Ultra trade it for sensor sampling. The
+      // driver refuses Eco above 4 kHz or while wired, so a locked device
+      // shows its current mode instead of a dead picker.
+      c.push(
+        s.sensorModeEditable === false
+          ? { id: "tee.info.sensor", label: "Sensor mode", description: "Locked at this polling rate or connection.", kind: "info" as const, current: String(s.sensorMode) }
+          : {
+              id: "tee.sensorMode",
+              label: "Sensor mode",
+              description: "Eco saves battery below 4 kHz wireless; High and Ultra raise sensor sampling.",
+              kind: "choice" as const,
+              options: opts(["Eco", "High", "Ultra"]),
+              current: s.sensorMode,
+            },
+      );
+    }
     if (s.dpiLedMode != null) {
       const modes: number[] = s.ui?.dpiLighting?.modes ?? [0, 1, 2];
       c.push({ id: "tee.dpiLed", label: "DPI indicator effect", kind: "choice", options: modes.map((m) => ({ value: m, label: m === 0 ? "Off" : m === 1 ? "Steady" : "Breathing" })), current: s.dpiLedMode });
@@ -642,6 +718,70 @@ function performanceExtras(brand: string, status: any, caps: DeviceCapabilities)
     });
   }
 
+  // Mice that let the app write the stage values, not just pick between the
+  // ones they already hold. Bounds come from the driver's own editor hint.
+  const stageEditor = ui.dpiStageEditor as
+    | { maxStages: number; countEditable?: boolean; minDpi: number; maxDpi: number; stepDpi: number }
+    | undefined;
+  if (stageEditor && Array.isArray(status.dpiStages) && status.dpiStages.length > 0) {
+    if (stageEditor.countEditable === true) {
+      c.push({
+        id: "perf.dpiStageCount",
+        label: "DPI stage count",
+        description: `How many stages the DPI button cycles through (1–${stageEditor.maxStages}).`,
+        kind: "choice",
+        options: Array.from({ length: stageEditor.maxStages }, (_, i) => ({ value: i + 1, label: String(i + 1) })),
+        current: status.dpiStages.length,
+      });
+    }
+    status.dpiStages.forEach((dpi: number, stage: number) => {
+      c.push({
+        id: `perf.dpiStageValue.${stage}`,
+        label: `Stage ${stage + 1} DPI`,
+        description: stage === (status.activeDpiStage ?? 0) ? "The stage in use right now." : "The DPI this stage selects.",
+        kind: "number",
+        min: stageEditor.minDpi,
+        max: stageEditor.maxDpi,
+        step: stageEditor.stepDpi,
+        unit: " DPI",
+        current: dpi,
+      });
+    });
+  }
+
+  // Sensor sampling on drivers outside the Teevolution profile, where the
+  // polling rate does not lock it.
+  if (brand !== "Teevolution" && status.sensorMode != null) {
+    c.push(
+      status.sensorModeEditable === false
+        ? { id: "perf.info.sensorMode", label: "Sensor mode", description: "Locked at this polling rate or connection.", kind: "info", current: String(status.sensorMode) }
+        : {
+            id: "perf.sensorMode",
+            label: "Sensor mode",
+            description: "Eco samples slower to save battery; High and Ultra raise sensor sampling.",
+            kind: "choice",
+            options: opts(["Eco", "High", "Ultra"]),
+            current: status.sensorMode,
+          },
+    );
+  }
+
+  // Continuous lift-off control (a raw device code) for mice that do not use
+  // the three shared stops; the page's own Lift-off row covers those.
+  if (status.liftOffScale && typeof status.liftOffScale.value === "number" && status.liftOffDistance == null) {
+    const l = status.liftOffScale;
+    c.push({
+      id: "perf.liftOffScale",
+      label: "Lift-off distance",
+      description: `Continuous lift-off control, ${l.minMillimetres ?? "?"}–${l.maxMillimetres ?? "?"} mm.`,
+      kind: "number",
+      min: l.min,
+      max: l.max,
+      step: 1,
+      current: l.value,
+    });
+  }
+
   if (typeof status.debounceMs === "number") {
     const values = caps.debounceOptions ?? (caps.debounceMaxMs !== null ? Array.from({ length: caps.debounceMaxMs + 1 }, (_, ms) => ms) : null);
     if (values && values.length) {
@@ -771,6 +911,46 @@ export async function writeControl(info: HidInterfaceInfo, status: any, id: stri
   if (id.startsWith("mag.") && !id.startsWith("mag.info.")) return writeMagnetic(info, status, id, value);
   // Table-driven generic setting: `gen.set/<field>/<method>`.
   if (id.startsWith("gen.set/")) return callClientMethod(info, id.split("/")[2], value);
+  // Razer toggle actions only switch between their factory action and Disabled.
+  if (id.startsWith("razer.toggle.")) {
+    const control = id.slice("razer.toggle.".length);
+    const label = String(value);
+    await callClientMethod(info, "setToggleControl", control, label);
+    if (status.razerButtonMappings) status.razerButtonMappings[control] = label;
+    return label;
+  }
+  // Per-stage DPI editing, for mice whose driver publishes a stage editor.
+  if (id.startsWith("perf.dpiStageValue.") || id === "perf.dpiStageCount") {
+    const editor = status.ui?.dpiStageEditor;
+    if (id === "perf.dpiStageCount") {
+      const maxStages = Number(editor?.maxStages ?? status.dpiStages?.length ?? 1);
+      const count = Math.max(1, Math.min(maxStages, Math.round(Number(value))));
+      await callClientMethod(info, "setDpiStageCount", count);
+      const stages: number[] = Array.isArray(status.dpiStages) ? status.dpiStages.slice() : [];
+      if (count <= stages.length) {
+        stages.length = count;
+      } else {
+        while (stages.length < count) stages.push(stages.at(-1) ?? status.dpi ?? Number(editor?.minDpi ?? 400));
+      }
+      status.dpiStages = stages;
+      if ((status.activeDpiStage ?? 0) >= count) {
+        status.activeDpiStage = count - 1;
+        status.dpi = stages[count - 1];
+      }
+      return count;
+    }
+    const stage = Number(id.slice("perf.dpiStageValue.".length));
+    const step = Number(editor?.stepDpi ?? 1) || 1;
+    const min = Number(editor?.minDpi ?? 0);
+    const max = Number(editor?.maxDpi ?? 26000);
+    const snapped = Math.min(max, Math.max(min, min + Math.round((Number(value) - min) / step) * step));
+    await callClientMethod(info, "setDpiStageValue", stage, snapped);
+    if (Array.isArray(status.dpiStages) && stage < status.dpiStages.length) {
+      status.dpiStages[stage] = snapped;
+      if ((status.activeDpiStage ?? 0) === stage) status.dpi = snapped;
+    }
+    return snapped;
+  }
   const [family, kind, rest] = id.split(".");
   // Logitech button remap: `logi.button.<layer>.<n>` edits the running onboard
   // profile. The library checks the profile's CRC and format first, skips the
@@ -880,6 +1060,57 @@ export async function writeControl(info: HidInterfaceInfo, status: any, id: stri
     case "tee.duration": return w.setPerformanceDuration(info, Number(value));
     case "pulsar.wheel": return w.setWheelAcceleration(info, Boolean(value));
     case "pulsar.profile": return w.setProfile(info, Number(value));
+    case "perf.sensorMode":
+    case "tee.sensorMode": {
+      const mode = String(value);
+      await callClientMethod(info, "setSensorMode", mode);
+      status.sensorMode = mode;
+      // Teevolution stores the mode as a 0/1 flag next to the live value.
+      if (id === "tee.sensorMode") status.sensorModeStored = mode === "High" ? 1 : 0;
+      return mode;
+    }
+    case "perf.liftOffScale": {
+      const code = Math.round(Number(value));
+      await callClientMethod(info, "setLiftOffScale", code);
+      const scale = status.liftOffScale;
+      if (scale && Number.isFinite(scale.minMillimetres) && Number.isFinite(scale.maxMillimetres)) {
+        scale.value = code;
+        scale.millimetres =
+          scale.minMillimetres +
+          ((code - scale.min) * (scale.maxMillimetres - scale.minMillimetres)) / Math.max(1, scale.max - scale.min);
+      }
+      return code;
+    }
+    case "egg.angle": {
+      const angle = Math.round(Number(value));
+      await callClientMethod(info, "setSensorAngleTuning", angle);
+      status.eggAngleTuning = angle;
+      return angle;
+    }
+    case "egg.lod": {
+      const index = Number(value);
+      await callClientMethod(info, "setEggLodIndex", index);
+      status.eggLodIndex = index;
+      return index;
+    }
+    case "egg.forceMaxFps": {
+      const enabled = Boolean(value);
+      await callClientMethod(info, "setForceMaxSensorFps", enabled);
+      status.eggForceMaxFps = enabled;
+      return enabled;
+    }
+    case "egg.ledLiftOff": {
+      const disabled = Boolean(value);
+      await callClientMethod(info, "setLedLiftOffDisabled", disabled);
+      status.eggLedLiftOffDisabled = disabled;
+      return disabled;
+    }
+    case "egg.leftHanded": {
+      const leftHanded = Boolean(value);
+      await callClientMethod(info, "setLeftHanded", leftHanded);
+      status.eggLeftHanded = leftHanded;
+      return leftHanded;
+    }
   }
   if (id.startsWith("lf.debounce.")) return callClientMethod(info, "setLunaFuryButtonDebounce", id.split(".")[2], Number(value));
   if (family === "razer" && kind === "button") return w.setButtonMapping(info, rest as any, value);
