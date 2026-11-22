@@ -43,7 +43,13 @@ impl GameWatcher {
                     })
                     .await;
                 tracker = updated;
-                if view
+                // No transition, no reason to schedule work on the main
+                // thread; the weak handle still tells us if the view is gone.
+                if changes.is_empty() {
+                    if view.upgrade().is_none() {
+                        break;
+                    }
+                } else if view
                     .update(cx, |view, cx| view.apply_game_updates(&changes, cx))
                     .is_err()
                 {
@@ -74,7 +80,11 @@ impl GameWatcher {
                     })
                     .await;
                 tracker = updated;
-                if view
+                if changes.is_empty() {
+                    if view.upgrade().is_none() {
+                        break;
+                    }
+                } else if view
                     .update(cx, |view, cx| view.apply_game_updates(&changes, cx))
                     .is_err()
                 {

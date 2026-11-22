@@ -138,8 +138,9 @@ struct GamesFile {
 /// Embedded catalog (`public/games.json` at build time).
 const GAMES_JSON: &str = include_str!("../../public/games.json");
 
-/// Load the catalog; `installed` starts false until a scan completes.
-pub fn load_catalog() -> Vec<Game> {
+/// Parsed once: the app, both watchers, and the art prefetch each call
+/// `load_catalog` at startup, and every caller needs its own mutable copy.
+static CATALOG: std::sync::LazyLock<Vec<Game>> = std::sync::LazyLock::new(|| {
     match serde_json::from_str::<GamesFile>(GAMES_JSON) {
         Ok(file) => file.games,
         Err(e) => {
@@ -147,6 +148,11 @@ pub fn load_catalog() -> Vec<Game> {
             Vec::new()
         }
     }
+});
+
+/// Load the catalog; `installed` starts false until a scan completes.
+pub fn load_catalog() -> Vec<Game> {
+    CATALOG.clone()
 }
 
 /// Refresh installed state from Steam, Epic, and Riot manifests. Blocking;
