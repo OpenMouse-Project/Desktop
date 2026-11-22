@@ -3231,6 +3231,10 @@ impl AppView {
         };
         let sidebar = if self.sidebar_collapsed { SIDEBAR_COLLAPSED_W } else { SIDEBAR_W };
         let art_side = ((view_width - sidebar - 2.0 * PAGE_PAD) * 0.36).clamp(260.0, 520.0);
+        // The controls column takes what the fixed artwork column leaves; a
+        // window narrower than artwork + 720 px used to let it overflow the
+        // right edge instead of shrinking.
+        let controls_w = (view_width - sidebar - 2.0 * PAGE_PAD - art_side - 24.0).clamp(320.0, 720.0);
 
         let mut tab_bar = h_flex().gap_1();
         // Only tabs this device has something for: Buttons if its driver (or a
@@ -3326,13 +3330,14 @@ impl AppView {
                     .size_full()
                     .p_4()
                     .gap_4()
-                    .when(show_bar, |this| this.pb(px(96.)))
-                    .overflow_y_scrollbar()
                     .child(header)
                     .child(
                         h_flex()
                             .gap_6()
                             .items_start()
+                            .w_full()
+                            .flex_1()
+                            .min_h_0()
                             .child(
                                 div()
                                     .flex()
@@ -3346,16 +3351,28 @@ impl AppView {
                                     }),
                             )
                             // Tabs sit directly over the controls they switch.
+                            // Only this column scrolls: the title, artwork and
+                            // back button stay put, as on the Overview page.
                             .child(
                                 div()
                                     .flex()
                                     .flex_col()
                                     .gap_3()
-                                    .flex_1()
+                                    .flex_none()
+                                    .w(px(controls_w))
                                     .min_w_0()
-                                    .max_w(px(720.))
+                                    .h_full()
+                                    .min_h_0()
                                     .child(tab_bar)
-                                    .child(content),
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_h_0()
+                                            .pr_2()
+                                            .when(show_bar, |this| this.pb(px(96.)))
+                                            .overflow_y_scrollbar()
+                                            .child(content),
+                                    ),
                             ),
                     ),
             )
