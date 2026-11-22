@@ -16,9 +16,14 @@ await build({
   platform: "neutral",
   mainFields: ["module", "main"],
   conditions: ["import"],
-  // Identifiers stay: scan.ts reports `client.constructor.name` in errors.
+  // Identifiers are mangled too, but `keepNames` preserves the constructor
+  // names scan.ts reports in its errors. Together that is ~25% off the bundle
+  // (879 KB -> 657 KB at the time of writing), which is source QuickJS has to
+  // parse on first device use.
   minifyWhitespace: true,
   minifySyntax: true,
+  minifyIdentifiers: true,
+  keepNames: true,
   legalComments: "none",
   alias: {
     "@tauri-apps/api/core": path.join(here, "shims/tauri-core.ts"),
