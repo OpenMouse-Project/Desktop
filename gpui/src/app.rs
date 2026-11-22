@@ -163,6 +163,7 @@ fn release_stage(version: &str) -> &'static str {
 pub enum Page {
     Overview,
     Games,
+    Plugins,
     Supported,
     Settings,
     /// Version and release notes; opened from the sidebar footer, not the nav list.
@@ -174,6 +175,7 @@ impl Page {
         match self {
             Page::Overview => "Overview",
             Page::Games => "Games",
+            Page::Plugins => "Plugins",
             Page::Supported => "Supported mice",
             Page::Settings => "Settings",
             Page::Updates => "Updates",
@@ -184,6 +186,7 @@ impl Page {
         match self {
             Page::Overview => IconName::LayoutDashboard,
             Page::Games => IconName::Gamepad2,
+            Page::Plugins => IconName::Blocks,
             Page::Supported => IconName::BookOpen,
             Page::Settings => IconName::Settings,
             Page::Updates => IconName::CircleArrowUp,
@@ -218,6 +221,9 @@ const SIDEBAR_COLLAPSED_W: f32 = 72.0;
 /// The community server, the same invite openmouse.app links to.
 const DISCORD_INVITE_URL: &str = "https://discord.gg/yxC9jzMdw6";
 
+/// The product site, linked from the Discord plugin's detail view.
+const OPENMOUSE_SITE_URL: &str = "https://openmouse.app";
+
 /// The Discord glyph (drawn in the theme colour by `themed_discord`), embedded so
 /// there is no file to ship or find at runtime.
 static DISCORD_SVG: &str = include_str!("../assets/discord.svg");
@@ -240,6 +246,18 @@ fn themed_discord(color: Hsla) -> std::sync::Arc<Image> {
     let image = std::sync::Arc::new(Image::from_bytes(ImageFormat::Svg, svg.into_bytes()));
     cache.push((hex, image.clone()));
     image
+}
+
+/// "just now", "12 min ago", "1 h 5 min ago" for a battery sample.
+fn battery_age(at: std::time::Instant) -> String {
+    let secs = at.elapsed().as_secs();
+    if secs < 60 {
+        "just now".to_string()
+    } else if secs < 3600 {
+        format!("{} min ago", secs / 60)
+    } else {
+        format!("{} h {} min ago", secs / 3600, (secs % 3600) / 60)
+    }
 }
 
 /// The selected device's detail card (battery bar, DPI, polling rate,
@@ -477,6 +495,8 @@ pub struct AppView {
     profiles: crate::profiles::Profiles,
     /// Game whose profile is being edited on the Games page.
     profile_editor: Option<String>,
+    /// Plugin whose detail view is open on the Plugins page (`"discord"`).
+    plugin_open: Option<String>,
     /// One per (game, device) whose profile is currently in control.
     profile_overrides: Vec<ProfileOverride>,
     /// (game, device) pairs with a write in flight, so none is applied twice.
@@ -494,6 +514,10 @@ pub struct AppView {
     overlay: Option<AnyWindowHandle>,
     /// Newest scheduled presence update wins (Discord rate-limits them).
     presence_seq: u64,
+    /// Battery samples per device (`battery %` over time), session-scoped.
+    battery_history: std::collections::HashMap<String, std::collections::VecDeque<(std::time::Instant, f64)>>,
+    /// Device key + sample index the pointer is over on the battery chart.
+    battery_hover: Option<(String, usize)>,
     /// Last failure from the Launch-on-startup / Discord switches, shown under them.
     startup_error: Option<String>,
     discord_error: Option<String>,
@@ -627,6 +651,7 @@ impl AppView {
             presence: Default::default(),
             profiles: Default::default(),
             profile_editor: None,
+            plugin_open: None,
             profile_overrides: Vec::new(),
             profile_inflight: Vec::new(),
             profile_device: None,
@@ -637,6 +662,8 @@ impl AppView {
             checking_for_updates: false,
             overlay: None,
             presence_seq: 0,
+            battery_history: Default::default(),
+            battery_hover: None,
             startup_error: None,
             discord_error: None,
             badge_hovered: false,
@@ -660,6 +687,26 @@ impl AppView {
             view.set_discord(true, cx);
         }
         view.scan_devices(cx);
+        // Battery history grows even while the window sits idle: render only
+        // runs on events, so take a sample once a minute ourselves.
+        cx.spawn(async move |view, cx| {
+            loop {
+                // Battery drains slowly; waking every five minutes is plenty and
+                // costs no HID traffic (the sample comes from the last status).
+                cx.background_executor().timer(Duration::from_secs(300)).await;
+                if view
+                    .update(cx, |view, cx| {
+                        if view.record_battery_samples() {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
         view
     }
 
@@ -687,6 +734,7 @@ impl Default for AppView {
             presence: Default::default(),
             profiles: Default::default(),
             profile_editor: None,
+            plugin_open: None,
             profile_overrides: Vec::new(),
             profile_inflight: Vec::new(),
             profile_device: None,
@@ -697,6 +745,8 @@ impl Default for AppView {
             checking_for_updates: false,
             overlay: None,
             presence_seq: 0,
+            battery_history: Default::default(),
+            battery_hover: None,
             startup_error: None,
             discord_error: None,
             badge_hovered: false,
@@ -712,6 +762,39 @@ impl Default for AppView {
 }
 
 impl AppView {
+    /// One battery sample per device per five minutes (or on a ≥1% change),
+    /// kept for the session so the Overview tab can draw a usage graph.
+    /// Returns whether anything was recorded.
+    fn record_battery_samples(&mut self) -> bool {
+        let samples: Vec<(String, f64)> = self
+            .devices
+            .tiles
+            .iter()
+            .filter_map(|tile| match &tile.status {
+                TileStatus::Connected(r) => r.battery.map(|battery| (tile.key.clone(), battery)),
+                _ => None,
+            })
+            .collect();
+        let mut recorded = false;
+        for (key, battery) in samples {
+            let history = self.battery_history.entry(key).or_default();
+            let due = match history.back() {
+                Some((at, last)) => {
+                    at.elapsed() >= std::time::Duration::from_secs(300) || (*last - battery).abs() >= 1.0
+                }
+                None => true,
+            };
+            if due {
+                history.push_back((std::time::Instant::now(), battery));
+                while history.len() > 240 {
+                    history.pop_front();
+                }
+                recorded = true;
+            }
+        }
+        recorded
+    }
+
     /// What Rich Presence should say right now, from the settings and state:
     /// the game being played (top line) and the mouse and its stats (second line).
     fn presence_text(&self) -> (String, String) {
@@ -2169,7 +2252,12 @@ impl AppView {
         let accent = cx.theme().primary;
 
         let mut nav = div().flex().flex_col().gap_1();
-        for (id, page) in [("nav-overview", Page::Overview), ("nav-games", Page::Games), ("nav-supported", Page::Supported)] {
+        for (id, page) in [
+            ("nav-overview", Page::Overview),
+            ("nav-games", Page::Games),
+            ("nav-plugins", Page::Plugins),
+            ("nav-supported", Page::Supported),
+        ] {
             nav = nav.child(self.nav_row(id, page.icon(), page.label(), self.page == page, collapsed, cx).on_click(
                 cx.listener(move |this, _, _, cx| {
                     // Choosing the page you are on goes back to its top level.
@@ -2305,6 +2393,9 @@ impl AppView {
     }
 
     fn render_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if self.page == Page::Plugins {
+            return self.render_plugins(window, cx);
+        }
         if self.page == Page::Settings {
             return self.render_settings(window, cx);
         }
@@ -2968,7 +3059,7 @@ impl AppView {
     /// The default device tab: the handful of settings people change most
     /// (sensitivity, polling rate, lift-off, surface), plus the device's
     /// firmware versions and a place for the updater to land.
-    fn render_overview_tab(&self, r: &DeviceReadout, cx: &mut Context<Self>) -> AnyElement {
+    fn render_overview_tab(&self, key: &str, r: &DeviceReadout, cx: &mut Context<Self>) -> AnyElement {
         let fg = cx.theme().foreground;
         let muted = cx.theme().muted_foreground;
         let border = cx.theme().border;
@@ -3181,6 +3272,144 @@ impl AppView {
         }
         if r.connection.is_some() || r.battery.is_some() || r.mode.is_some() {
             col = col.child(device);
+        }
+
+        // Battery usage over this session: one thin bar per sample, with a
+        // hover point that shows the exact level and age.
+        let history: Vec<(f64, std::time::Instant)> = self
+            .battery_history
+            .get(key)
+            .map(|samples| samples.iter().map(|(at, battery)| (*battery, *at)).collect())
+            .unwrap_or_default();
+        if history.len() >= 2 {
+            let count = history.len();
+            let hovered = self
+                .battery_hover
+                .as_ref()
+                .filter(|(device, _)| device == key)
+                .and_then(|(_, index)| history.get(*index).map(|point| (*index, *point)));
+            let last = history.last().map(|(battery, _)| *battery).unwrap_or(0.0);
+            let header_value = match hovered {
+                Some((_, (battery, at))) => format!("{battery:.0}% · {}", battery_age(at)),
+                None => format!("{last:.0}%{}", if r.charging { " · charging" } else { "" }),
+            };
+            let mut chart = div()
+                .relative()
+                .h(px(96.))
+                .w_full()
+                .rounded_md()
+                .bg(Hsla { a: 0.05, ..fg })
+                .overflow_hidden();
+            for level in [25.0f32, 50.0, 75.0] {
+                chart = chart.child(
+                    div()
+                        .absolute()
+                        .left(px(0.))
+                        .right(px(0.))
+                        .bottom(relative(level / 100.0))
+                        .h(px(1.))
+                        .bg(Hsla { a: 0.25, ..border }),
+                );
+            }
+            let line_points: Vec<(f32, f32)> = history
+                .iter()
+                .enumerate()
+                .map(|(index, (battery, _))| {
+                    (
+                        index as f32 / (count - 1) as f32,
+                        (battery / 100.0).clamp(0.0, 1.0) as f32,
+                    )
+                })
+                .collect();
+            let stroke = accent;
+            chart = chart.child(
+                canvas(
+                    {
+                        let points = line_points.clone();
+                        move |_bounds, _window, _cx| points
+                    },
+                    move |bounds, points, window, _cx| {
+                        let width = bounds.size.width.as_f32();
+                        let height = bounds.size.height.as_f32();
+                        for pair in points.windows(2) {
+                            let (x0, y0) = (
+                                bounds.origin.x.as_f32() + pair[0].0 * width,
+                                bounds.origin.y.as_f32() + (1.0 - pair[0].1) * height,
+                            );
+                            let (x1, y1) = (
+                                bounds.origin.x.as_f32() + pair[1].0 * width,
+                                bounds.origin.y.as_f32() + (1.0 - pair[1].1) * height,
+                            );
+                            let (dx, dy) = (x1 - x0, y1 - y0);
+                            let steps = ((dx.abs().max(dy.abs())) / 1.5).ceil().max(1.0) as usize;
+                            for step in 0..=steps {
+                                let t = step as f32 / steps as f32;
+                                window.paint_quad(fill(
+                                    Bounds {
+                                        origin: point(px(x0 + dx * t), px(y0 + dy * t)),
+                                        size: size(px(2.2), px(2.2)),
+                                    },
+                                    stroke,
+                                ));
+                            }
+                        }
+                    },
+                )
+                .absolute()
+                .left(px(0.))
+                .top(px(0.))
+                .size_full(),
+            );
+            for (index, (battery, _)) in history.iter().enumerate() {
+                let x = index as f32 / (count - 1) as f32;
+                let level = (battery / 100.0).clamp(0.0, 1.0) as f32;
+                let device_key = key.to_string();
+                chart = chart.child(
+                    div()
+                        .id(SharedString::from(format!("battery-point-{device_key}-{index}")))
+                        .absolute()
+                        .left(relative(x))
+                        .bottom(relative(level))
+                        .ml(px(-6.))
+                        .mb(px(-6.))
+                        .size(px(14.))
+                        .cursor_pointer()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(div().size(px(6.)).rounded_full().bg(accent))
+                        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                            if *hovered {
+                                this.battery_hover = Some((device_key.clone(), index));
+                            } else if this
+                                .battery_hover
+                                .as_ref()
+                                .is_some_and(|(device, at)| device == &device_key && *at == index)
+                            {
+                                this.battery_hover = None;
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+            col = col.child(
+                card("Battery")
+                    .child(
+                        h_flex()
+                            .items_start()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_0p5()
+                                    .child(div().text_sm().text_color(fg).child("Battery usage"))
+                                    .child(div().text_xs().text_color(muted).child("Session samples, oldest to newest.")),
+                            )
+                            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(fg).child(header_value)),
+                    )
+                    .child(chart),
+            );
         }
 
         // Firmware: only when the device reports versions; update checks land here.
@@ -3762,7 +3991,7 @@ impl AppView {
         };
 
         let content: AnyElement = match &tile.status {
-            TileStatus::Connected(r) if self.devices.tab == DeviceTab::Overview => self.render_overview_tab(r, cx),
+            TileStatus::Connected(r) if self.devices.tab == DeviceTab::Overview => self.render_overview_tab(&tile.key, r, cx),
             TileStatus::Connected(r) if self.devices.tab != DeviceTab::Performance => self.render_extra_tab(r, cx),
             TileStatus::Connected(r) => {
                 let mut col = div().flex().flex_col().gap_3().flex_1().min_w_0().max_w(px(720.));
@@ -4989,7 +5218,7 @@ impl AppView {
                     .children(
                         match switch_id {
                             "startup-switch" => self.startup_error.clone(),
-                            "discord-switch" => self.discord_error.clone(),
+                            "discord-switch" => None,
                             _ => None,
                         }
                         .map(|error| div().text_xs().text_color(cx.theme().danger).child(error)),
@@ -5033,6 +5262,349 @@ impl AppView {
                         this.settings.save();
                         cx.notify();
                     })),
+            )
+            .into_any_element()
+    }
+
+    /// Plugins: integrations presented as app tiles. Clicking a tile opens its
+    /// detail view (Discord Rich Presence today).
+    fn render_plugins(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if self.plugin_open.as_deref() == Some("discord") {
+            return self.render_discord_plugin(cx);
+        }
+        let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground;
+        let border = cx.theme().border;
+        let accent = cx.theme().primary;
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
+        let enabled = self.settings.discord_presence;
+        let status = if enabled && self.presence.is_connected() {
+            ("Connected", accent)
+        } else if enabled {
+            ("Waiting for Discord", muted)
+        } else {
+            ("Off", muted)
+        };
+
+        let tile = div()
+            .id("plugin-discord")
+            .cursor_pointer()
+            .w(px(320.))
+            .flex()
+            .flex_col()
+            .gap_4()
+            .p_4()
+            .rounded_lg()
+            .border_1()
+            .border_color(Hsla { a: 0.55, ..border })
+            .bg(card_bg)
+            .hover(move |this| this.bg(Hsla { a: 0.08, ..fg }).border_color(Hsla { a: 0.55, ..accent }))
+            .child(
+                h_flex()
+                    .items_start()
+                    .gap_3()
+                    .child(
+                        div()
+                            .size(px(46.))
+                            .flex_none()
+                            .rounded_lg()
+                            .bg(Hsla { a: 0.12, ..accent })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(img(themed_discord(accent)).w(px(24.)).h(px(18.)).into_any_element()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .flex_1()
+                            .min_w_0()
+                            .child(div().text_base().font_weight(FontWeight::SEMIBOLD).text_color(fg).child("Discord Rich Presence"))
+                            .child(div().text_xs().text_color(muted).child("Show your mouse and current game in your Discord status.")),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .px_2()
+                            .py_0p5()
+                            .rounded_full()
+                            .border_1()
+                            .border_color(Hsla { a: 0.5, ..accent })
+                            .bg(Hsla { a: 0.10, ..accent })
+                            .child(Icon::new(IconName::BadgeCheck).size(px(12.)).text_color(accent))
+                            .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(accent).child("Verified by OpenMouse")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(div().size(px(7.)).rounded_full().bg(if enabled { accent } else { status.1 }))
+                            .child(div().text_xs().text_color(status.1).child(status.0)),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().text_xs().text_color(muted).child("Open plugin settings"))
+                    .child(div().text_xs().text_color(accent).child("→")),
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.plugin_open = Some("discord".into());
+                cx.notify();
+            }));
+
+        div()
+            .size_full()
+            .overflow_y_scrollbar()
+            .child(
+                div()
+                    .w_full()
+                    .max_w(rems(64.))
+                    .p_6()
+                    .flex()
+                    .flex_col()
+                    .gap_6()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(div().text_xl().font_weight(FontWeight::SEMIBOLD).child("Plugins"))
+                            .child(div().text_sm().text_color(muted).child("Optional integrations. Cards marked verified ship with OpenMouse.")),
+                    )
+                    .child(h_flex().gap_4().flex_wrap().child(tile)),
+            )
+            .into_any_element()
+    }
+
+    /// Detail view for the Discord Rich Presence plugin: enable it and choose
+    /// what it publishes, with a live preview of the status line.
+    fn render_discord_plugin(&self, cx: &mut Context<Self>) -> AnyElement {
+        let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground;
+        let border = cx.theme().border;
+        let accent = cx.theme().primary;
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
+        let enabled = self.settings.discord_presence;
+
+        let verified = h_flex()
+            .gap_1()
+            .items_center()
+            .px_2()
+            .py_1()
+            .rounded_full()
+            .border_1()
+            .border_color(Hsla { a: 0.5, ..accent })
+            .bg(Hsla { a: 0.12, ..accent })
+            .child(Icon::new(IconName::BadgeCheck).size(px(13.)).text_color(accent))
+            .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(accent).child("Verified by OpenMouse"));
+
+        let header = h_flex()
+            .items_center()
+            .gap_3()
+            .p_4()
+            .border_b_1()
+            .border_color(Hsla { a: 0.55, ..border })
+            .child(
+                div()
+                    .size(px(38.))
+                    .flex_none()
+                    .rounded_md()
+                    .bg(Hsla { a: 0.12, ..accent })
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(img(themed_discord(accent)).w(px(20.)).h(px(15.)).into_any_element()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_0p5()
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().text_base().font_weight(FontWeight::SEMIBOLD).text_color(fg).child("Discord Rich Presence"))
+                    .child(div().text_xs().text_color(muted).child("Show your mouse and current game in your Discord status.")),
+            )
+            .child(verified);
+
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .p_4()
+            .child(self.render_switch_row(
+                "discord-switch",
+                "Enable Discord Rich Presence",
+                "Requires Discord to be running. The setting stays on so it reconnects next time Discord starts.",
+                enabled,
+                cx,
+            ));
+        if enabled {
+            let s = &self.settings;
+            let device = self.connected_devices().into_iter().find(|(_, r)| r.dpi.is_some());
+            let device_name = device
+                .as_ref()
+                .and_then(|(key, _)| self.devices.tiles.iter().find(|t| &t.key == key))
+                .map(|t| t.name.clone());
+            let dpi = device.as_ref().and_then(|(_, r)| r.dpi);
+            let polling_hz = device.as_ref().and_then(|(_, r)| {
+                if r.polling_read_only && r.polling_rates.is_empty() { None } else { r.polling_hz }
+            });
+            let running_game = self.games.iter().find(|g| g.running).map(|g| g.name.clone());
+            let sample_game = running_game.is_none();
+            let game_name = running_game.unwrap_or_else(|| "Counter-Strike 2".to_string());
+            let mut lines: Vec<String> = Vec::new();
+            if s.discord_show_game {
+                lines.push(format!("Playing {game_name}"));
+            }
+            if s.discord_show_device {
+                if let Some(name) = device_name {
+                    lines.push(name);
+                }
+            }
+            if s.discord_show_stats {
+                let mut stats = Vec::new();
+                if let Some(dpi) = dpi {
+                    stats.push(format!("{dpi:.0} DPI"));
+                }
+                if let Some(hz) = polling_hz {
+                    stats.push(format!("{hz:.0} Hz"));
+                }
+                if !stats.is_empty() {
+                    lines.push(stats.join(" · "));
+                }
+            }
+            if lines.is_empty() {
+                lines.push("Managing mouse settings".into());
+            }
+            body = body
+                .child(div().h(px(1.)).w_full().bg(Hsla { a: 0.55, ..border }))
+                .child(div().text_sm().font_weight(FontWeight::MEDIUM).text_color(fg).child("What to show"))
+                .child(self.render_switch_row(
+                    "discord-device",
+                    "Connected mouse",
+                    "Your mouse's name, e.g. PRO X SUPERLIGHT 2c.",
+                    self.settings.discord_show_device,
+                    cx,
+                ))
+                .child(self.render_switch_row(
+                    "discord-game",
+                    "Current game",
+                    "\"Playing …\" while a game from your library is running.",
+                    self.settings.discord_show_game,
+                    cx,
+                ))
+                .child(self.render_switch_row(
+                    "discord-stats",
+                    "Live stats",
+                    "Your mouse's current DPI and polling rate.",
+                    self.settings.discord_show_stats,
+                    cx,
+                ))
+                .child(div().h(px(1.)).w_full().bg(Hsla { a: 0.55, ..border }))
+                .child(div().text_xs().text_color(muted).child("Discord preview"))
+                .child(
+                    div()
+                        .flex()
+                        .gap_3()
+                        .p_3()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(Hsla { a: 0.55, ..border })
+                        .bg(Hsla { a: 0.10, ..fg })
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .flex_1()
+                                .min_w_0()
+                                .child(div().text_xs().text_color(muted).child("PLAYING A GAME"))
+                                .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(fg).child("OpenMouse Desktop"))
+                                .children(lines.iter().map(|line| {
+                                    div().text_sm().text_color(muted).child(line.clone())
+                                }))
+                                .children(sample_game.then(|| {
+                                    div()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child("Example game shown — a running game replaces it automatically.")
+                                })),
+                        ),
+                );
+            let status = if let Some(error) = &self.discord_error {
+                div().text_sm().text_color(cx.theme().danger).child(error.clone()).into_any_element()
+            } else if self.presence.is_connected() {
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(div().size(px(7.)).rounded_full().bg(accent))
+                    .child(div().text_sm().text_color(muted).child("Connected to Discord"))
+                    .into_any_element()
+            } else {
+                div().text_sm().text_color(muted).child("Waiting for Discord…").into_any_element()
+            };
+            body = body.child(status);
+        }
+
+        let card = div()
+            .flex()
+            .flex_col()
+            .rounded_lg()
+            .border_1()
+            .border_color(border)
+            .bg(card_bg)
+            .overflow_hidden()
+            .child(header)
+            .child(body);
+
+        div()
+            .size_full()
+            .overflow_y_scrollbar()
+            .child(
+                div()
+                    .w_full()
+                    .max_w(rems(48.))
+                    .p_6()
+                    .flex()
+                    .flex_col()
+                    .gap_6()
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                Button::new("plugin-back")
+                                    .ghost()
+                                    .compact()
+                                    .icon(IconName::ArrowLeft)
+                                    .label("Plugins")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.plugin_open = None;
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                Button::new("plugin-site")
+                                    .ghost()
+                                    .compact()
+                                    .icon(IconName::Globe)
+                                    .label("openmouse.app")
+                                    .on_click(cx.listener(|_, _, _, cx| cx.open_url(OPENMOUSE_SITE_URL))),
+                            ),
+                    )
+                    .child(card),
             )
             .into_any_element()
     }
@@ -5217,7 +5789,7 @@ impl AppView {
                         self.render_settings_section(
                             cx,
                             "General",
-                            "Startup and integration preferences.",
+                            "Startup preferences.",
                         )
                         .child(self.render_switch_row(
                             "startup-switch",
@@ -5225,56 +5797,7 @@ impl AppView {
                             "Open OpenMouse automatically when you log in.",
                             self.settings.launch_on_startup,
                             cx,
-                        ))
-                        .child(div().h(px(1.)).w_full().bg(cx.theme().border))
-                        .child(self.render_switch_row(
-                            "discord-switch",
-                            "Discord Rich Presence",
-                            "Show OpenMouse in your Discord status. Requires Discord to be running.",
-                            self.settings.discord_presence,
-                            cx,
-                        ))
-                        .when(self.settings.discord_presence, |section| {
-                            let (details, state) = self.presence_text();
-                            section
-                                .child(div().h(px(1.)).w_full().bg(cx.theme().border))
-                                .child(div().text_sm().font_weight(FontWeight::MEDIUM).text_color(cx.theme().foreground).child("What to show"))
-                                .child(self.render_switch_row(
-                                    "discord-device",
-                                    "Connected mouse",
-                                    "Your mouse's name, e.g. PRO X SUPERLIGHT 2c.",
-                                    self.settings.discord_show_device,
-                                    cx,
-                                ))
-                                .child(self.render_switch_row(
-                                    "discord-game",
-                                    "Current game",
-                                    "\"Playing …\" while a game from your library is running.",
-                                    self.settings.discord_show_game,
-                                    cx,
-                                ))
-                                .child(self.render_switch_row(
-                                    "discord-stats",
-                                    "Live stats",
-                                    "Your mouse's current DPI and polling rate.",
-                                    self.settings.discord_show_stats,
-                                    cx,
-                                ))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap_0p5()
-                                        .p_3()
-                                        .rounded_md()
-                                        .border_1()
-                                        .border_color(cx.theme().border)
-                                        .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Your status will read"))
-                                        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(cx.theme().foreground).child("OpenMouse Desktop"))
-                                        .child(div().text_sm().text_color(cx.theme().foreground).child(details))
-                                        .children((!state.is_empty()).then(|| div().text_sm().text_color(cx.theme().foreground).child(state))),
-                                )
-                        }),
+                        )),
                     )
                     .child(
                         self.render_settings_section(
@@ -5461,6 +5984,7 @@ impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.ensure_control_sliders(window, cx);
         self.ensure_single_dpi(window, cx);
+        let _ = self.record_battery_samples();
         let pages = [Page::Overview, Page::Games, Page::Supported];
         // Kit's Root paints the translucent semantic background once.
         // Keep the app shell clear so overlapping layers do not compound alpha.
