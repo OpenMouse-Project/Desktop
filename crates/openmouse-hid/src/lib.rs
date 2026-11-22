@@ -313,6 +313,16 @@ const READ_POLL_TIMEOUT_MS: i32 = 10;
 /// emitted, so it no longer delays report delivery by 5 ms.
 const READ_IDLE_GAP_MS: u64 = 5;
 
+/// Backoff after a failed read, doubling per consecutive failure.
+///
+/// A split the process may not read — Windows denies `ReadFile` on keyboard
+/// collections — fails forever with `ERROR_ACCESS_DENIED`. Retrying it at the
+/// normal 15 ms cadence burned CPU and printed tens of error lines a second
+/// for the life of the session; the reader now backs off to one attempt every
+/// couple of seconds and logs the first failure only.
+const READ_ERROR_BACKOFF_MS: u64 = 50;
+const READ_ERROR_BACKOFF_MAX_MS: u64 = 2000;
+
 /// Opt-in idle backoff for the reader threads, off unless a host calls
 /// [`set_idle_backoff`] (only the GPUI app does; the Tauri app is unchanged).
 ///
@@ -1070,6 +1080,7 @@ fn spawn_reader(
 ) -> JoinHandle<()> {
     thread::spawn(move || {
         let mut buffer = [0u8; 64];
+        let mut read_errors: u32 = 0;
         while !split.stop.load(Ordering::Relaxed) {
             // try_lock, not lock: a query/response exchange (hid_send_report
             // / hid_get_feature_report, called from the JS driver's own
@@ -1115,6 +1126,7 @@ fn spawn_reader(
                 Ok(0) => {}
                 Ok(length) => {
                     note_activity();
+                    read_errors = 0;
                     // Some backends prefix numbered reports with the report
                     // id, some don't — assume they do (report id in
                     // buffer[0]), matching the equivalent ambiguity the
@@ -1215,11 +1227,19 @@ fn spawn_reader(
                     });
                 }
                 Err(error) => {
-                    // A transient read error (e.g. device unplugged) — the
-                    // stop flag (set by hid_close) is what ends this loop
-                    // deliberately; anything else just backs off briefly.
-                    applog!("[hid] reader {key}: read_timeout error: {error}");
-                    thread::sleep(Duration::from_millis(50));
+                    // Not always transient: a collection Windows will not let
+                    // this process read fails forever. Back off so a broken
+                    // split cannot spin at the normal cadence, and report the
+                    // first failure only.
+                    read_errors = read_errors.saturating_add(1);
+                    if read_errors == 1 {
+                        applog!("[hid] reader {key}: read failed, backing off: {error}");
+                    }
+                    let shift = read_errors.saturating_sub(1).min(6);
+                    let backoff = READ_ERROR_BACKOFF_MS
+                        .saturating_mul(1 << shift)
+                        .min(READ_ERROR_BACKOFF_MAX_MS);
+                    thread::sleep(Duration::from_millis(backoff));
                 }
             }
             // Deliberately after the report above has been emitted and with
