@@ -710,8 +710,8 @@ function performanceExtras(brand: string, status: any, caps: DeviceCapabilities)
   if (Array.isArray(status.dpiStages) && status.dpiStages.length > 1) {
     c.push({
       id: "perf.dpiStage",
-      label: "DPI stages",
-      description: "On-device sensitivity stages; pick the active one.",
+      label: "Active stage",
+      description: "On-device sensitivity stages; pick the one in use.",
       kind: "choice",
       options: status.dpiStages.map((_: unknown, i: number) => ({ value: i, label: `Stage ${i + 1}` })),
       current: status.activeDpiStage ?? null,
@@ -727,7 +727,7 @@ function performanceExtras(brand: string, status: any, caps: DeviceCapabilities)
     if (stageEditor.countEditable === true) {
       c.push({
         id: "perf.dpiStageCount",
-        label: "DPI stage count",
+        label: "Stage count",
         description: `How many stages the DPI button cycles through (1–${stageEditor.maxStages}).`,
         kind: "choice",
         options: Array.from({ length: stageEditor.maxStages }, (_, i) => ({ value: i + 1, label: String(i + 1) })),
@@ -738,7 +738,7 @@ function performanceExtras(brand: string, status: any, caps: DeviceCapabilities)
       c.push({
         id: `perf.dpiStageValue.${stage}`,
         label: `Stage ${stage + 1} DPI`,
-        description: stage === (status.activeDpiStage ?? 0) ? "The stage in use right now." : "The DPI this stage selects.",
+        description: stage === (status.activeDpiStage ?? 0) ? "In use right now." : undefined,
         kind: "number",
         min: stageEditor.minDpi,
         max: stageEditor.maxDpi,
@@ -854,7 +854,28 @@ function performanceExtras(brand: string, status: any, caps: DeviceCapabilities)
       }],
     });
   }
-  if (c.length) out.push({ title: "More settings", controls: c });
+  // One card per concern instead of a single catch-all "More settings". The
+  // controls are built in one list; classify them here so their order and
+  // grouping stay in one place.
+  const groupOf = (control: Control): string => {
+    const id = control.id;
+    if (id === "perf.sleep" || id === "perf.lowPower" || id === "gen.powerMode" || id === "perf.usbSpeed") {
+      return "Power & wireless";
+    }
+    if (id.startsWith("perf.dpiStage")) return "DPI stages";
+    if (id === "perf.debounce" || id === "perf.primaryButton") return "Switches";
+    return "Sensor";
+  };
+  const groups = new Map<string, Control[]>();
+  for (const control of c) {
+    const title = groupOf(control);
+    groups.set(title, [...(groups.get(title) ?? []), control]);
+  }
+  // Fixed order, so cards do not move around as fields appear.
+  for (const title of ["DPI stages", "Sensor", "Power & wireless", "Switches"]) {
+    const controls = groups.get(title);
+    if (controls?.length) out.push({ title, controls });
+  }
   return out;
 }
 

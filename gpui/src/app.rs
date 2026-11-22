@@ -260,6 +260,9 @@ struct Devices {
     /// X and Y DPI edited separately (mice with separate axes); linked by default,
     /// since a single number on screen hides a differing Y.
     unlinked_axes: bool,
+    /// The Sensitivity card's segmented view: false = on-device stages,
+    /// true = single-DPI presets.
+    dpi_single: bool,
     tab: DeviceTab,
     /// Stored profiles of the open Logitech device, once read (on demand).
     onboard: Option<crate::hid::OnboardProfiles>,
@@ -2368,17 +2371,28 @@ impl AppView {
         on_click: impl Fn(&mut Self, &mut Context<Self>) + 'static,
     ) -> Stateful<Div> {
         let primary = cx.theme().primary;
+        let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground;
+        let border = cx.theme().border;
         div()
             .id(SharedString::from(id))
             .cursor_pointer()
+            .flex()
+            .items_center()
+            .justify_center()
+            .min_w(px(44.))
             .px_3()
             .py_1p5()
-            .rounded_md()
+            .rounded_full()
             .border_1()
             .text_sm()
-            .border_color(if selected { primary } else { cx.theme().border })
-            .when(selected, |this| this.bg(Hsla { a: 0.14, ..primary }))
-            .text_color(if selected { cx.theme().foreground } else { cx.theme().muted_foreground })
+            .border_color(if selected { primary } else { Hsla { a: 0.55, ..border } })
+            .when(selected, |this| this.bg(Hsla { a: 0.16, ..primary }).text_color(fg))
+            .when(!selected, |this| {
+                this.bg(Hsla { a: 0.04, ..fg })
+                    .text_color(muted)
+                    .hover(|style| style.bg(Hsla { a: 0.09, ..fg }).text_color(fg))
+            })
             .child(label)
             .on_click(cx.listener(move |this, _, _, cx| on_click(this, cx)))
     }
@@ -2460,16 +2474,17 @@ impl AppView {
         h_flex()
             .gap_3()
             .items_center()
-            .children(slider.map(|s| div().w(px(220.)).child(Slider::new(&s).bg(accent).text_color(fg))))
+            .justify_end()
+            .children(slider.map(|s| div().w(px(200.)).child(Slider::new(&s).bg(accent).text_color(fg))))
             .child(
                 div()
-                    .min_w(px(84.))
+                    .w(px(92.))
                     .px_2()
                     .py_1()
                     .rounded_md()
                     .border_1()
-                    .border_color(Hsla { a: 0.7, ..border })
-                    .bg(Hsla { a: 0.05, ..fg })
+                    .border_color(Hsla { a: 0.45, ..border })
+                    .bg(Hsla { a: 0.07, ..fg })
                     .text_sm()
                     .text_center()
                     .text_color(fg)
@@ -2586,9 +2601,15 @@ impl AppView {
                 .child(c.current.as_str().map(str::to_string).unwrap_or_else(|| c.current.to_string()))
                 .into_any_element(),
         };
-        let row = h_flex().gap_4().items_center().justify_between().child(label_block).child(control);
+        let row = h_flex()
+            .gap_6()
+            .items_center()
+            .justify_between()
+            .py_3()
+            .child(label_block)
+            .child(div().flex_none().max_w(px(360.)).flex().justify_end().child(control));
         match unfolded {
-            Some(options) => div().flex().flex_col().gap_2().child(row).child(options).into_any_element(),
+            Some(options) => div().flex().flex_col().gap_2().pb_3().child(row).child(options).into_any_element(),
             None => row.into_any_element(),
         }
     }
@@ -2602,6 +2623,7 @@ impl AppView {
         let fg = cx.theme().foreground;
         let muted = cx.theme().muted_foreground;
         let border = cx.theme().border;
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
         let onboard_mode = r.mode.as_deref() == Some("Onboard");
         let mut col = div().flex().flex_col().gap_3().flex_1().min_w_0().max_w(px(720.));
         let note = |text: &str| div().text_sm().text_color(muted).child(text.to_string());
@@ -2647,6 +2669,7 @@ impl AppView {
             .rounded_lg()
             .border_1()
             .border_color(border)
+            .bg(card_bg)
             .child(
                 div()
                     .text_sm()
@@ -2698,7 +2721,15 @@ impl AppView {
         let onboard_mode = r.mode.as_deref() == Some("Onboard");
         let busy = self.devices.writing.is_some();
         let card = || {
-            div().flex().flex_col().gap_2().p_4().rounded_lg().border_1().border_color(border)
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .p_4()
+                .rounded_lg()
+                .border_1()
+                .border_color(border)
+                .bg(Hsla { a: 0.72, ..cx.theme().background })
         };
         let mut col = div().flex().flex_col().gap_3().flex_1().min_w_0().max_w(px(720.));
 
@@ -2824,6 +2855,7 @@ impl AppView {
         let fg = cx.theme().foreground;
         let muted = cx.theme().muted_foreground;
         let border = cx.theme().border;
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
         let busy = self.devices.writing.is_some();
         if self.devices.tab == DeviceTab::Profiles {
             return self.render_onboard_profiles(r, cx);
@@ -2851,14 +2883,34 @@ impl AppView {
                 let mut card = div()
                     .flex()
                     .flex_col()
-                    .gap_3()
                     .p_4()
                     .rounded_lg()
                     .border_1()
                     .border_color(border)
-                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(fg).child(section.title.clone()));
-                for control in &section.controls {
-                    card = card.child(self.render_control(control, cx));
+                    .bg(card_bg)
+                    .child(
+                        div()
+                            .pb_2()
+                            .mb_1()
+                            .border_b_1()
+                            .border_color(Hsla { a: 0.6, ..border })
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(muted)
+                                    .child(section.title.to_uppercase()),
+                            ),
+                    );
+                let last = section.controls.len().saturating_sub(1);
+                for (index, control) in section.controls.iter().enumerate() {
+                    card = card.child(
+                        div()
+                            .when(index < last, |this| {
+                                this.border_b_1().border_color(Hsla { a: 0.35, ..border })
+                            })
+                            .child(self.render_control(control, cx)),
+                    );
                 }
                 col = col.child(card);
             }
@@ -2875,6 +2927,7 @@ impl AppView {
                     .rounded_lg()
                     .border_1()
                     .border_color(border)
+                    .bg(card_bg)
                     .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(fg).child(title.to_string()))
             };
             if spec.write_only {
@@ -2959,6 +3012,299 @@ impl AppView {
         col.into_any_element()
     }
 
+    /// The Sensitivity card from the web app: a Stages/Single switch, the
+    /// current DPI, one row per on-device stage with its own enable tick, stage
+    /// number (click to make active), DPI value and slider, or a compact list
+    /// of single-DPI presets. Only rendered for devices that publish a DPI
+    /// stage editor in `perf.*`.
+    fn render_stage_sensitivity(&self, tile: &Tile, r: &DeviceReadout, cx: &mut Context<Self>) -> AnyElement {
+        let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground;
+        let border = cx.theme().border;
+        let accent = cx.theme().primary;
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
+        let controls: Vec<&crate::hid::ControlSpec> =
+            r.tabs.performance.iter().flat_map(|s| s.controls.iter()).collect();
+        let count = controls.iter().find(|c| c.id == "perf.dpiStageCount");
+        let active_control = controls.iter().find(|c| c.id == "perf.dpiStage");
+        let mut stages: Vec<(usize, &crate::hid::ControlSpec)> = controls
+            .iter()
+            .filter_map(|c| {
+                c.id.strip_prefix("perf.dpiStageValue.")
+                    .and_then(|n| n.parse::<usize>().ok())
+                    .map(|index| (index, *c))
+            })
+            .collect();
+        stages.sort_by_key(|(index, _)| *index);
+        let max_stages = count.map(|c| c.options.len().max(1)).unwrap_or(stages.len()).max(1);
+        let active = active_control
+            .and_then(|c| c.current.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(0);
+        let current = r.dpi.unwrap_or(0.0);
+        let single = self.devices.dpi_single;
+
+        let segmented = {
+            let mut row = h_flex().gap_1().p_1().rounded_full().bg(Hsla { a: 0.05, ..fg });
+            row = row.child(self.chip(
+                "dpi-view-stages".into(),
+                "Stages".into(),
+                !single,
+                cx,
+                |this, cx| {
+                    this.devices.dpi_single = false;
+                    cx.notify();
+                },
+            ));
+            row = row.child(self.chip(
+                "dpi-view-single".into(),
+                "Single".into(),
+                single,
+                cx,
+                |this, cx| {
+                    this.devices.dpi_single = true;
+                    cx.notify();
+                },
+            ));
+            row
+        };
+
+        let header = h_flex()
+            .items_center()
+            .justify_between()
+            .gap_4()
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .size(px(40.))
+                            .flex_none()
+                            .rounded_full()
+                            .bg(Hsla { a: 0.14, ..accent })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_base()
+                            .text_color(accent)
+                            .child("◎"),
+                    )
+                    .child(div().text_base().font_weight(FontWeight::SEMIBOLD).text_color(fg).child("Sensitivity"))
+                    .child(segmented),
+            )
+            .child(
+                div()
+                    .text_3xl()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(fg)
+                    .child(format!("{current:.0} DPI")),
+            );
+
+        let mut card = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .p_4()
+            .rounded_lg()
+            .border_1()
+            .border_color(border)
+            .bg(card_bg)
+            .child(header);
+
+        if single {
+            // The mouse's own presets (plus its current DPI when that is not on
+            // the list), one clickable row each; the current one is ticked.
+            let mut presets: Vec<f64> = r
+                .controls
+                .as_ref()
+                .map(|c| {
+                    c.dpi_presets
+                        .iter()
+                        .copied()
+                        .filter(|p| *p >= c.dpi.min && *p <= c.dpi.max)
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !presets.iter().any(|p| (p - current).abs() < 0.5) && current > 0.0 {
+                presets.insert(0, current);
+            }
+            presets.truncate(4);
+            let used = presets.iter().filter(|p| (**p - current).abs() < 0.5).count();
+            card = card.child(
+                h_flex()
+                    .justify_between()
+                    .child(div().text_sm().text_color(muted).child("Presets in use"))
+                    .child(div().text_sm().text_color(muted).child(format!("{used} / {}", presets.len().max(1)))),
+            );
+            for (index, preset) in presets.iter().copied().enumerate() {
+                let selected = (preset - current).abs() < 0.5;
+                let row = div()
+                    .id(SharedString::from(format!("dpi-preset-row-{index}")))
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .when(selected, |this| this.bg(Hsla { a: 0.10, ..accent }))
+                    .child(
+                        div()
+                            .size(px(18.))
+                            .flex_none()
+                            .rounded_sm()
+                            .border_1()
+                            .border_color(if selected { accent } else { border })
+                            .when(selected, |this| this.bg(accent))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_xs()
+                            .text_color(fg)
+                            .child(if selected { "✓" } else { "" }),
+                    )
+                    .child(div().w(px(20.)).text_sm().text_color(muted).child(format!("{}", index + 1)))
+                    .child(
+                        div()
+                            .w(px(96.))
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(Hsla { a: 0.45, ..border })
+                            .bg(Hsla { a: 0.07, ..fg })
+                            .text_sm()
+                            .text_center()
+                            .text_color(fg)
+                            .child(format!("{preset:.0}")),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(if selected { "In use" } else { "Click to use" }),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.edit_dpi(preset, None, cx)));
+                card = card.child(row);
+            }
+            card = card
+                .child(div().text_xs().text_color(muted).child(
+                    "Single puts one DPI on the mouse. Pick a preset row, or use the steppers above to enter a value.",
+                ))
+                .child(div().text_xs().text_color(muted).child(format!("Current {current:.0} DPI")));
+            return card.into_any_element();
+        }
+
+        card = card.child(
+            h_flex()
+                .justify_between()
+                .child(div().text_sm().text_color(muted).child("Stages in use"))
+                .child(div().text_sm().text_color(muted).child(format!("{} / {max_stages}", stages.len()))),
+        );
+
+        for index in 0..max_stages {
+            let stage = stages.iter().find(|(i, _)| *i == index).map(|(_, c)| *c);
+            let enabled = stage.is_some();
+            let is_active = enabled && index == active;
+            let fallback = stages
+                .last()
+                .map(|(_, c)| c.current.as_f64().unwrap_or(current))
+                .unwrap_or(current);
+            let value = stage.and_then(|c| c.current.as_f64()).unwrap_or(fallback);
+            let control_id = stage.map(|c| c.id.clone()).unwrap_or_default();
+            let slider_key = format!("{}/{}", tile.key, control_id);
+            let live = self.slider_live.get(&slider_key).copied();
+            let shown = live.unwrap_or(value);
+            let slider = self.control_sliders.get(&slider_key).cloned();
+            let checkbox = div()
+                .id(SharedString::from(format!("dpi-stage-tick-{index}")))
+                .cursor_pointer()
+                .size(px(18.))
+                .flex_none()
+                .rounded_sm()
+                .border_1()
+                .border_color(if enabled { accent } else { border })
+                .when(enabled, |this| this.bg(accent))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_xs()
+                .text_color(fg)
+                .child(if enabled { "✓" } else { "" })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // Enabling this row includes every row up to it; disabling
+                    // drops it and any later ones. At least one stays.
+                    let next = if enabled { (index + 1).max(1) } else { index.max(1) };
+                    this.set_control("perf.dpiStageCount".into(), serde_json::json!(next), cx);
+                }));
+            let number = div()
+                .id(SharedString::from(format!("dpi-stage-pick-{index}")))
+                .cursor_pointer()
+                .size(px(26.))
+                .flex_none()
+                .rounded_md()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_sm()
+                .when(is_active, |this| this.bg(accent).text_color(fg).font_weight(FontWeight::SEMIBOLD))
+                .when(!is_active, |this| this.bg(Hsla { a: 0.06, ..fg }).text_color(muted))
+                .child(format!("{}", index + 1))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if enabled {
+                        this.set_control("perf.dpiStage".into(), serde_json::json!(index), cx);
+                    }
+                }));
+            let value_box = div()
+                .w(px(96.))
+                .flex_none()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .border_1()
+                .border_color(Hsla { a: 0.45, ..border })
+                .bg(Hsla { a: 0.07, ..fg })
+                .text_sm()
+                .text_center()
+                .text_color(if enabled { fg } else { muted })
+                .child(if enabled { format!("{shown:.0}") } else { format!("{value:.0}") });
+            let mut track = div().flex_1().min_w_0();
+            if let (true, Some(slider)) = (enabled, slider) {
+                track = track.child(Slider::new(&slider).bg(accent).text_color(fg));
+            } else {
+                track = track.child(
+                    div()
+                        .h(px(4.))
+                        .w_full()
+                        .rounded_full()
+                        .bg(Hsla { a: 0.08, ..fg }),
+                );
+            }
+            let row = div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .px_3()
+                .py_2()
+                .rounded_md()
+                .when(is_active, |this| this.bg(Hsla { a: 0.10, ..accent }))
+                .child(checkbox)
+                .child(number)
+                .child(value_box)
+                .child(track);
+            card = card.child(row);
+        }
+
+        card = card
+            .child(div().text_xs().text_color(muted).child(
+                "One row per DPI stage. Tick a row to include it in the DPI cycle; untick to disable it and keep the value for later. Click a number to make it the starting stage.",
+            ))
+            .child(div().text_xs().text_color(muted).child(format!("Current {current:.0} DPI")));
+        card.into_any_element()
+    }
+
     /// Per-device settings: sensitivity, polling rate, lift-off distance and
     /// gaming-surface mode, written through the shared protocol drivers.
     /// With instant apply off, edits are staged and the bottom bar applies them.
@@ -2967,6 +3313,9 @@ impl AppView {
         let fg = cx.theme().foreground;
         let muted = cx.theme().muted_foreground;
         let border = cx.theme().border;
+        // Cards sit over the ASCII field; without a surface the pattern runs
+        // through labels and reads as strikethrough.
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
         let busy = self.devices.writing.is_some();
         let staged = &self.devices.staged;
         let instant = self.settings.instant_apply;
@@ -3020,7 +3369,20 @@ impl AppView {
                 .rounded_lg()
                 .border_1()
                 .border_color(border)
-                .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(fg).child(title.to_string()))
+                .bg(card_bg)
+                .child(
+                    div()
+                        .pb_2()
+                        .border_b_1()
+                        .border_color(Hsla { a: 0.55, ..border })
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(muted)
+                                .child(title.to_uppercase()),
+                        ),
+                )
         };
 
         let content: AnyElement = match &tile.status {
@@ -3037,7 +3399,11 @@ impl AppView {
 
                 // Sensitivity. Hidden when the driver reports no real DPI (a
                 // control whose Apply would fail), as the Tauri tab does.
-                if let (Some(current), Some(c)) = (r.dpi.filter(|d| *d > 0.0), &r.controls) {
+                // A device with a writable DPI stage table gets the web app's
+                // Sensitivity card instead of the plain stepper.
+                if r.tabs.performance.iter().flat_map(|s| s.controls.iter()).any(|c| c.id == "perf.dpiStageCount") {
+                    col = col.child(self.render_stage_sensitivity(tile, r, cx));
+                } else if let (Some(current), Some(c)) = (r.dpi.filter(|d| *d > 0.0), &r.controls) {
                     let unlinked = r.separate_axes && self.devices.unlinked_axes;
                     let cur_y = r.dpi_y.unwrap_or(current);
                     let x_now = staged.dpi.unwrap_or(current);
@@ -3200,9 +3566,25 @@ impl AppView {
                 // debounce, low-power threshold, USB speed, primary button…), from the
                 // shared JS with the Tauri tab's own gating. These apply immediately.
                 for group in &r.tabs.performance {
+                    // The stage table has its own Sensitivity card above.
+                    let controls: Vec<&crate::hid::ControlSpec> = group
+                        .controls
+                        .iter()
+                        .filter(|c| !c.id.starts_with("perf.dpiStage"))
+                        .collect();
+                    if controls.is_empty() {
+                        continue;
+                    }
                     let mut card = section(&group.title);
-                    for control in &group.controls {
-                        card = card.child(self.render_control(control, cx));
+                    let last = controls.len().saturating_sub(1);
+                    for (index, control) in controls.iter().enumerate() {
+                        card = card.child(
+                            div()
+                                .when(index < last, |this| {
+                                    this.border_b_1().border_color(Hsla { a: 0.35, ..border })
+                                })
+                                .child(self.render_control(control, cx)),
+                        );
                     }
                     col = col.child(card);
                 }
