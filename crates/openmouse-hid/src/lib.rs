@@ -1564,19 +1564,18 @@ fn is_unprocessed_echo(reply: &[u8], last_sent: Option<&Vec<u8>>) -> bool {
 }
 
 /// Buffer size for a feature-report read of `report_id` on one interface,
-/// including the report-id byte: whatever the caller asked for, raised to the
-/// length the interface's descriptor declares when that is longer.
+/// including the report-id byte.
 ///
-/// Windows refuses a read shorter than the declared report
-/// (ERROR_INVALID_PARAMETER) and macOS/Linux truncate, so asking for too little
-/// is never merely "less data" — it is a hard failure on the platform this app
-/// runs on, which is how the Endgame Gear OP1 8K's 1040-byte config report
-/// became unreadable while every shorter read worked.
+/// The descriptor is authoritative: Windows rejects a read *shorter* than the
+/// declared report (ERROR_INVALID_PARAMETER), and some receivers reject a read
+/// *longer* than it too — the WLMouse 8K receiver answers
+/// `ERROR_GEN_FAILURE` when asked for 90 bytes of its declared 64-byte config
+/// report. Only when the interface declares no such report (Razer's
+/// undocumented 90-byte reports, say) does the caller's request decide the size.
 fn feature_read_len(layout: &ReportLayout, report_id: u8, requested: usize) -> usize {
-    let wanted = requested.saturating_add(1);
     layout
         .feature_buffer_len(report_id)
-        .map_or(wanted, |declared| wanted.max(declared))
+        .unwrap_or_else(|| requested.saturating_add(1))
 }
 
 fn try_each(
@@ -1702,10 +1701,11 @@ mod tests {
         ]
     }
 
-    /// The reported failure: the adapter asks for 90 bytes of every feature
-    /// report, which on Windows is a hard ERROR_INVALID_PARAMETER for the
-    /// 1040-byte config report rather than a short read. The descriptor's own
-    /// length has to win.
+    /// The adapter asks for 90 bytes of every feature report. On Windows that
+    /// is a hard ERROR_INVALID_PARAMETER when the declared report is longer
+    /// (Endgame's 1040 bytes) and ERROR_GEN_FAILURE when it is shorter
+    /// (WLMouse's 64-byte config report), so the descriptor's own length wins
+    /// whenever the interface declares the report.
     #[test]
     fn feature_reads_are_sized_from_the_descriptor() {
         let (_, layout) = parse_report_descriptor(&egg_style_descriptor()).unwrap();
@@ -1713,10 +1713,10 @@ mod tests {
         assert_eq!(layout.feature_buffer_len(0xa0), Some(1041));
         // The bug: 90 asked, 1041 needed.
         assert_eq!(feature_read_len(&layout, 0xa0, 90), 1041);
-        // A longer request is still honoured, and a shorter report is not
-        // forced up to the longest one the interface declares.
-        assert_eq!(feature_read_len(&layout, 0xa0, 4096), 4097);
-        assert_eq!(feature_read_len(&layout, 0xa1, 90), 91);
+        // The other direction: 90 asked, 64 declared (WLMouse 8K receiver).
+        assert_eq!(feature_read_len(&layout, 0xa1, 90), 64);
+        // A longer request does not inflate a declared report either.
+        assert_eq!(feature_read_len(&layout, 0xa0, 4096), 1041);
         // An interface that does not declare the report keeps the caller's
         // request — the platform may still answer something.
         assert_eq!(feature_read_len(&layout, 0x99, 90), 91);
