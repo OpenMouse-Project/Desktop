@@ -92,10 +92,74 @@ fn art_cache_path(dir: &std::path::Path, game: &Game) -> std::path::PathBuf {
     }
 }
 
+/// Longest edge of the card-sized copy handed to `img()`.
+///
+/// Cards are 148×200 logical (267×400 device pixels at 1.5× scale). The
+/// originals are 460×215–1440×2160, so decoding them costs 0.4–12.4 MB of RGBA
+/// each, and GPUI's asset store retains every decoded image until the process
+/// exits. Resampling once to 400 px keeps a full page of 15 cards at ~6 MB
+/// instead of ~58 MB.
+const CARD_ART_LONGEST: u32 = 400;
+
+/// Card-sized copy of an original art file: `<stem>@card.jpg` beside it.
+fn card_art_file(original: &std::path::Path) -> std::path::PathBuf {
+    let stem = original.file_stem().unwrap_or_default().to_string_lossy();
+    original.with_file_name(format!("{stem}@card.jpg"))
+}
+
+/// Resample `original` to [`CARD_ART_LONGEST`] and cache the result. Blocking;
+/// callers must run this off the UI thread. Returns `None` when the original
+/// cannot be decoded, leaving the card on its letter tile.
+fn shrink_card_art(original: &std::path::Path) -> Option<std::path::PathBuf> {
+    let small = card_art_file(original);
+    if small.is_file() {
+        return Some(small);
+    }
+    // Header-only first: truncated downloads fail here without a full decode.
+    let reader = image::ImageReader::open(original)
+        .ok()?
+        .with_guessed_format()
+        .ok()?;
+    let (width, height) = reader.into_dimensions().ok()?;
+    let img = image::open(original).ok()?;
+    let scale = (CARD_ART_LONGEST as f32 / width.max(height) as f32).min(1.0);
+    let (w, h) = (
+        ((width as f32 * scale).round() as u32).max(1),
+        ((height as f32 * scale).round() as u32).max(1),
+    );
+    // JPEG has no alpha; RGB also halves the transient buffer for big covers.
+    let resized = image::imageops::resize(&img.to_rgb8(), w, h, image::imageops::FilterType::Lanczos3);
+    let tmp = small.with_extension("part.jpg");
+    let file = std::fs::File::create(&tmp).ok()?;
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(std::io::BufWriter::new(file), 88);
+    if resized.write_with_encoder(encoder).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return None;
+    }
+    if std::fs::rename(&tmp, &small).is_ok() {
+        Some(small)
+    } else {
+        let _ = std::fs::remove_file(&tmp);
+        None
+    }
+}
+
 /// Local art file for a game, if already prefetched.
 pub fn cached_art_path(game: &Game) -> Option<std::path::PathBuf> {
     let path = art_cache_path(&art_cache_dir()?, game);
     path.is_file().then_some(path)
+}
+
+/// Art file cards should load: only the card-sized copy.
+///
+/// Falling back to the original would decode a 12 MB cover the moment a card
+/// paints, before prefetch has finished shrinking it — the exact spike this
+/// cache exists to avoid. Until the copy lands the card shows its letter tile,
+/// then repaints when prefetch notifies.
+pub fn card_art_path(game: &Game) -> Option<std::path::PathBuf> {
+    let original = cached_art_path(game)?;
+    let small = card_art_file(&original);
+    small.is_file().then_some(small)
 }
 
 /// Download missing art for all games with a resolvable URL. Blocking;
@@ -108,24 +172,26 @@ pub fn prefetch_art(games: &[Game]) {
     for game in games {
         let Some(url) = game.art_url() else { continue };
         let target = art_cache_path(&dir, game);
-        if target.is_file() {
-            continue;
+        if !target.is_file() {
+            let tmp = dir.join(format!("{}.part", game.id));
+            let status = crate::proc::quiet(
+                std::process::Command::new("curl")
+                    .args(["-sSfL", "-m", "20", "-o"])
+                    .arg(&tmp)
+                    .arg(&url)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null()),
+            )
+            .status();
+            if status.is_ok_and(|s| s.success()) && tmp.is_file() {
+                let _ = std::fs::rename(&tmp, &target);
+            } else {
+                let _ = std::fs::remove_file(&tmp);
+            }
         }
-        let tmp = dir.join(format!("{}.part", game.id));
-        let status = crate::proc::quiet(
-            std::process::Command::new("curl")
-                .args(["-sSfL", "-m", "20", "-o"])
-                .arg(&tmp)
-                .arg(&url)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null()),
-        )
-        .status();
-        if status.is_ok_and(|s| s.success()) && tmp.is_file() {
-            let _ = std::fs::rename(&tmp, &target);
-        } else {
-            let _ = std::fs::remove_file(&tmp);
+        if target.is_file() && shrink_card_art(&target).is_none() {
+            eprintln!("[games] could not prepare card art for {}", game.id);
         }
     }
 }
@@ -217,5 +283,21 @@ mod tests {
             running: false,
         };
         assert_eq!(game.art_url().as_deref(), Some("https://example.com/a.jpg"));
+    }
+
+    #[test]
+    fn card_art_shrinks_to_400px() {
+        let dir = std::env::temp_dir().join(format!("openmouse-card-art-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let original = dir.join("cover.jpg");
+        let cover = image::RgbImage::from_fn(1200, 1800, |x, y| image::Rgb([x as u8, y as u8, 96]));
+        cover.save(&original).unwrap();
+
+        let small = shrink_card_art(&original).expect("shrink failed");
+        assert_eq!(small, dir.join("cover@card.jpg"));
+        assert_eq!(image::image_dimensions(&small).unwrap(), (267, 400));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
