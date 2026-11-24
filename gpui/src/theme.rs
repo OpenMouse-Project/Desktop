@@ -99,31 +99,21 @@ pub fn sample_wallpaper_accent() -> anyhow::Result<(u8, u8, u8)> {
                 let path_str = path.to_string_lossy().into_owned();
                 let out_str = converted.to_string_lossy().into_owned();
                 // Same timeout discipline as osascript: never let a
-                // stalled converter block the caller forever.
-                let mut child = std::process::Command::new("sips")
+                // stalled converter block the caller forever, and kill it so
+                // the failed attempt does not leave a process behind.
+                let mut command = std::process::Command::new("sips");
+                command
                     .args(["-s", "format", "png", "-Z", "512"])
                     .arg(&path_str)
                     .arg("--out")
-                    .arg(&out_str)
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::piped())
-                    .spawn()
-                    .map_err(|e| anyhow::anyhow!("could not run sips: {e}"))?;
-                let status = {
-                    let (tx, rx) = std::sync::mpsc::channel();
-                    std::thread::spawn(move || {
-                        let _ = tx.send(child.wait());
-                    });
-                    match rx.recv_timeout(OSASCRIPT_TIMEOUT) {
-                        Ok(r) => r.map_err(|e| anyhow::anyhow!("sips failed: {e}"))?,
-                        Err(_) => anyhow::bail!("sips timed out after 5s"),
-                    }
-                };
-                if !status.success() {
+                    .arg(&out_str);
+                let output = run_with_timeout(command, OSASCRIPT_TIMEOUT)
+                    .map_err(|e| anyhow::anyhow!("sips failed: {e}"))?;
+                if !output.status.success() {
                     anyhow::bail!(
-                        "could not decode wallpaper at {} ({first}); sips exited {status}",
+                        "could not decode wallpaper at {} ({first}); sips exited {}",
                         path.display(),
+                        output.status,
                     );
                 }
                 let img = image::open(&converted).map_err(|e| {
@@ -149,23 +139,29 @@ pub fn sample_wallpaper_accent() -> anyhow::Result<(u8, u8, u8)> {
 #[cfg(target_os = "macos")]
 const OSASCRIPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-#[cfg(target_os = "macos")]
-fn run_osascript(args: &[&str]) -> anyhow::Result<std::process::Output> {
+/// Run a helper with a hard deadline, killing it on expiry.
+///
+/// A timed-out child used to keep running: the reader thread stayed blocked in
+/// `child.wait()` forever, so a stalled `osascript` leaked one process and one
+/// thread on every 2 s poll. Killing the child makes `wait` return, which ends
+/// the reader thread with it.
+#[cfg(any(target_os = "macos", test))]
+fn run_with_timeout(
+    mut command: std::process::Command,
+    timeout: std::time::Duration,
+) -> anyhow::Result<std::process::Output> {
     use std::io::Read as _;
-    let mut child = std::process::Command::new("osascript")
-        .args(args)
-        // Detach stdin: a backgrounded launch has no tty, and an inherited
-        // closed/confused stdin has hung script hosts before.
+    let mut child = command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("could not run osascript: {e}"))?;
+        .spawn()?;
+    // Drain the pipes on a helper thread: a full pipe buffer would block the
+    // child and keep `try_wait` from ever reporting an exit.
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let status = child.wait();
         let mut out = Vec::new();
         let mut err = Vec::new();
         if let Some(mut o) = stdout {
@@ -174,19 +170,38 @@ fn run_osascript(args: &[&str]) -> anyhow::Result<std::process::Output> {
         if let Some(mut e) = stderr {
             let _ = e.read_to_end(&mut err);
         }
-        let _ = tx.send((status, out, err));
+        let _ = tx.send((out, err));
     });
-    match rx.recv_timeout(OSASCRIPT_TIMEOUT) {
-        Ok((status, out, err)) => {
-            let status = status.map_err(|e| anyhow::anyhow!("osascript wait failed: {e}"))?;
-            Ok(std::process::Output {
-                status,
-                stdout: out,
-                stderr: err,
-            })
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
         }
-        Err(_) => anyhow::bail!("osascript timed out after 5s (backgrounded process?)"),
-    }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!("timed out after {timeout:?}; helper killed");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    // The child is gone, so the reader thread is at EOF or about to be. Cap
+    // the wait anyway: a grandchild inheriting the pipes must not stall us.
+    let (stdout, stderr) = rx
+        .recv_timeout(std::time::Duration::from_millis(500))
+        .unwrap_or_default();
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn run_osascript(args: &[&str]) -> anyhow::Result<std::process::Output> {
+    let mut command = std::process::Command::new("osascript");
+    command.args(args);
+    run_with_timeout(command, OSASCRIPT_TIMEOUT)
+        .map_err(|e| anyhow::anyhow!("osascript failed: {e}"))
 }
 
 #[cfg(target_os = "macos")]
@@ -275,6 +290,19 @@ pub fn cached_dynamic_accent() -> Option<(u8, u8, u8)> {
     DYNAMIC_CACHE.lock().unwrap().1
 }
 
+/// Signature the cached sample came from; `None` before the first successful
+/// sample. The watcher treats this as its "last seen" marker so the startup
+/// sample (which fills it) is not decoded a second time on the first tick.
+pub fn cached_dynamic_signature() -> Option<String> {
+    DYNAMIC_CACHE.lock().unwrap().0.clone()
+}
+
+/// Records a signature whose sample failed, keeping the last good accent.
+/// Without it an unreadable wallpaper would be re-decoded every poll.
+fn mark_dynamic_signature(signature: Option<String>) {
+    DYNAMIC_CACHE.lock().unwrap().0 = signature;
+}
+
 /// Poll loop keeping Dynamic in sync while the app runs (mirrors
 /// `startDynamicAccentWatcher`): 2s signature ticks while Dynamic is the
 /// theme and the window is active, slower otherwise, resampling + repainting
@@ -289,7 +317,6 @@ pub fn spawn_wallpaper_watcher(
     let view = view.downgrade();
     let window = *window;
     cx.spawn(async move |cx| {
-        let mut last: Option<String> = None;
         // Only Dynamic follows the wallpaper, and every check costs an
         // `osascript` spawn on macOS, so any other theme just waits it out.
         // Switching to Dynamic resamples on its own (`AppView::set_theme`),
@@ -317,7 +344,10 @@ pub fn spawn_wallpaper_watcher(
                 .background_executor()
                 .spawn(async { wallpaper_signature().ok() })
                 .await;
-            if signature == last {
+            // The cache carries the signature of the last sample, including
+            // the startup one, so this does not re-decode the same wallpaper
+            // once per launch.
+            if signature.is_none() || signature == cached_dynamic_signature() {
                 continue;
             }
             // ...then the real sample on the background executor.
@@ -326,9 +356,11 @@ pub fn spawn_wallpaper_watcher(
                 .spawn(async { sample_wallpaper_accent().ok() })
                 .await
             else {
+                // Remember the failure: retrying an unreadable wallpaper every
+                // 2 s would spawn the sampler forever.
+                mark_dynamic_signature(signature);
                 continue;
             };
-            last = signature.clone();
             store_dynamic_sample(signature, accent);
             // Back on the foreground executor: repaint if Dynamic is live.
             if view
@@ -1002,6 +1034,52 @@ pub fn crossfade_colors(from: ThemeColor, to: ThemeColor, cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A helper that never exits must be killed at the deadline: the old
+    /// thread + `recv_timeout` shape leaked the child (and its waiter thread)
+    /// on every stalled poll.
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn timed_out_helpers_are_killed() {
+        #[cfg(windows)]
+        let mut slow = {
+            let mut command = std::process::Command::new("cmd");
+            command.args(["/c", "ping", "-n", "30", "127.0.0.1"]);
+            command
+        };
+        #[cfg(target_os = "macos")]
+        let mut slow = {
+            let mut command = std::process::Command::new("sleep");
+            command.arg("30");
+            command
+        };
+        let started = std::time::Instant::now();
+        let error = run_with_timeout(slow, std::time::Duration::from_millis(200))
+            .expect_err("a 30 s helper must time out");
+        assert!(error.to_string().contains("timed out"), "{error}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    /// The kill path must not break the normal path: output still arrives.
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn helper_output_is_captured() {
+        #[cfg(windows)]
+        let command = {
+            let mut command = std::process::Command::new("cmd");
+            command.args(["/c", "echo", "openmouse"]);
+            command
+        };
+        #[cfg(target_os = "macos")]
+        let command = {
+            let mut command = std::process::Command::new("echo");
+            command.arg("openmouse");
+            command
+        };
+        let output = run_with_timeout(command, std::time::Duration::from_secs(5)).unwrap();
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("openmouse"));
+    }
 
     #[test]
     fn default_accent_hue_is_green() {
