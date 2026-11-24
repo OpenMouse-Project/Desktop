@@ -1,0 +1,69 @@
+name: Update Keyboard Protocol
+
+# Keeps @openmouse/keyboard-protocol on the newest published release. Does
+# nothing until package.json declares that dependency. The embedded driver
+# bundle is rebuilt first, so a release that breaks it is not committed.
+on:
+  schedule:
+    # Avoid the top of the hour, when scheduled workflows are most likely to queue.
+    - cron: "37 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-protocol-dependencies
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install latest protocol release
+        id: protocol
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          current=$(node -p "require('./package.json').dependencies['@openmouse/keyboard-protocol'] ?? ''")
+          if [[ -z "$current" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest=$(npm view @openmouse/keyboard-protocol version)
+
+          if [[ "$current" == "$latest" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          npm install --save-exact "@openmouse/keyboard-protocol@$latest"
+          git diff --exit-code -- . \
+            ':(exclude)package.json' \
+            ':(exclude)package-lock.json'
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "version=$latest" >> "$GITHUB_OUTPUT"
+
+      - name: Build the embedded driver bundle
+        if: steps.protocol.outputs.changed == 'true'
+        run: node gpui/js/build.mjs
+
+      - name: Commit verified update
+        if: steps.protocol.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.protocol.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore(protocol): bump @openmouse/keyboard-protocol to $VERSION"
+          git push
