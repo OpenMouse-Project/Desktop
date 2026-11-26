@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Build tooling for the native GPUI app: gpui/build.rs bundles the protocol drivers with esbuild.",
   "dependencies": {
-    "@openmouse/keyboard-protocol": "1.7.0",
+    "@openmouse/keyboard-protocol": "1.8.0",
     "@openmouse/protocol": "0.61.0"
   },
   "devDependencies": {
