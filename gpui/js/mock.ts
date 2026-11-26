@@ -1,10 +1,10 @@
-// A fake Finalmouse Starlight X for looking at the UI without hardware
-// (OPENMOUSE_MOCK=slx, ulx, x3 or mag; a trailing "!" hides the real devices). Nothing here talks to a device: writes are accepted
-// and only the in-memory status changes.
+// Fake mice for looking at the UI without hardware (OPENMOUSE_MOCK=slx, ulx,
+// x3, mag, razer or egg; a trailing "!" hides the real devices). Nothing here
+// talks to a device: writes are accepted and only the in-memory status changes.
 
 export const isMockKey = (key: string) => key.startsWith("mock:");
 
-/** Which fake devices OPENMOUSE_MOCK asked for ("slx", "ulx", "x3", or a comma list). */
+/** Which fake devices OPENMOUSE_MOCK asked for ("slx", "ulx", "x3", "mag", "razer", "egg", or a comma list). */
 export const mockCandidates = (wanted: string) => [
   ...(wanted.includes("slx") ? [{
     info: { key: "mock:slx", vendorId: 0x361d, productId: 0x0100, productString: "Starlight X (mock)", manufacturerString: "Finalmouse", collections: [] },
@@ -22,11 +22,30 @@ export const mockCandidates = (wanted: string) => [
     info: { key: "mock:x3", vendorId: 0x046d, productId: 0xc0a9, productString: "PRO X 3 Superstrike (mock)", manufacturerString: "Logitech", collections: [] },
     brands: ["Logitech"],
   }] : []),
+  ...(wanted.includes("razer") ? [{
+    info: { key: "mock:razer", vendorId: 0x1532, productId: 0x00b8, productString: "Viper V3 Pro (mock)", manufacturerString: "Razer", collections: [] },
+    brands: ["Razer"],
+  }] : []),
+  ...(wanted.includes("egg") ? [{
+    info: { key: "mock:egg", vendorId: 0x3367, productId: 0x1941, productString: "OP1 8K v2 (mock)", manufacturerString: "Endgame Gear", collections: [] },
+    brands: ["Endgame Gear"],
+  }] : []),
 ];
 
-export const mockBrand = (key: string) => (key === "mock:x3" ? "Logitech" : key === "mock:mag" ? "Lamzu" : "Finalmouse");
+export const mockBrand = (key: string) =>
+  key === "mock:x3" ? "Logitech"
+  : key === "mock:mag" ? "Lamzu"
+  : key === "mock:razer" ? "Razer"
+  : key === "mock:egg" ? "Endgame Gear"
+  : "Finalmouse";
 
-export const mockStatus = (key: string) => (key === "mock:x3" ? mockX3() : key === "mock:mag" ? mockMag() : key === "mock:ulx" ? mockUlx() : mockSlx());
+export const mockStatus = (key: string) =>
+  key === "mock:x3" ? mockX3()
+  : key === "mock:mag" ? mockMag()
+  : key === "mock:ulx" ? mockUlx()
+  : key === "mock:razer" ? mockRazer()
+  : key === "mock:egg" ? mockEgg()
+  : mockSlx();
 
 // Ultralight X as FinalmouseHidClient.readStatus() reports it: the whole
 // polling ladder and Motion Sync are adjustable, lift-off is the legacy 1/2 mm
@@ -34,7 +53,15 @@ export const mockStatus = (key: string) => (key === "mock:x3" ? mockX3() : key =
 const mockUlx = () => ({
   brand: "Finalmouse",
   name: "Finalmouse UltralightX",
-  ui: { family: "finalmouse-ulx", defaultDisplayName: "Finalmouse UltralightX", hideUnsupportedPollingRates: true, forceShowBattery: true },
+  ui: {
+    family: "finalmouse-ulx",
+    defaultDisplayName: "Finalmouse UltralightX",
+    hideUnsupportedPollingRates: true,
+    forceShowBattery: true,
+    dpiStageEditor: { maxStages: 4, countEditable: true, minDpi: 10, maxDpi: 26000, stepDpi: 10 },
+  },
+  dpiStages: [400, 800, 1600, 3200],
+  activeDpiStage: 1,
   batteryPercent: 91,
   batteryVoltageMv: 4080,
   batteryState: "Discharging",
@@ -86,6 +113,64 @@ const mockMag = () => ({
     calibration: "calibrated",
     liveDepth: false,
   },
+});
+
+// Razer's driver reports the two button families in one dict: cross-assignable
+// controls and the toggle actions, which only offer their factory action or
+// Disabled. Used by the mock to exercise both sections.
+const mockRazer = () => ({
+  brand: "Razer",
+  name: "Viper V3 Pro",
+  batteryPercent: 88,
+  batteryState: "Discharging",
+  connectionType: "Wireless",
+  dpi: 1600,
+  pollingRateHz: 1000,
+  supportedPollingRates: [125, 250, 500, 1000, 2000, 4000, 8000],
+  razerButtonMappings: {
+    leftClick: "Left Click",
+    rightClick: "Right Click",
+    middleClick: "Middle Click",
+    back: "Back",
+    forward: "Forward",
+    dpiCycle: "DPI Cycle",
+    scrollUp: "Scroll Up",
+    scrollDown: "Disabled",
+    sensitivityButton: "Cycle Up Sensitivity Stages",
+  },
+  firmware: ["v2.01.00"],
+});
+
+// Endgame Gear v2 firmware: shared Glass/SPDT/CPI controls plus the sensor and
+// handedness fields only the 8K v2 / 4K v2 wireless mice carry.
+const mockEgg = () => ({
+  brand: "Endgame Gear",
+  name: "OP1 8K v2",
+  batteryPercent: 76,
+  batteryState: "Discharging",
+  connectionType: "Wireless",
+  dpi: 800,
+  pollingRateHz: 8000,
+  supportedPollingRates: [125, 250, 500, 1000, 2000, 4000, 8000],
+  eggButtonMappings: ["Left Click", "Right Click", "Middle Click", "Back", "Forward", "DPI Cycle"],
+  eggMulticlickFilters: [16, 16, 16, 16, 16],
+  eggCpiStages: [{ dpi: 400 }, { dpi: 800 }, { dpi: 1600 }],
+  eggCpiLevels: 3,
+  eggPollingDivider: 1,
+  eggGlassMode: false,
+  eggSupportsGlassMode: true,
+  slamclickFilter: false,
+  motionJitterFilter: true,
+  leftSpdtMode: "Off",
+  rightSpdtMode: "GX Safe",
+  eggSupportsV2SensorControls: true,
+  eggAngleTuning: 0,
+  eggForceMaxFps: false,
+  eggLedLiftOffDisabled: false,
+  eggLeftHanded: false,
+  eggLodIndex: 3,
+  eggLodOptions: ["0.7 mm", "0.8 mm", "1.0 mm", "1.5 mm", "2.0 mm"],
+  firmware: ["v2.0.0"],
 });
 
 const mockX3 = () => ({

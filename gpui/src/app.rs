@@ -4,6 +4,7 @@ use crate::theme::ThemeChoice;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::slider::{SliderEvent, SliderState};
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::input::{InputEvent, InputState, NumberInput};
 use gpui_kit::component::radio::{Radio, RadioGroup};
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::Icon;
@@ -162,6 +163,7 @@ fn release_stage(version: &str) -> &'static str {
 pub enum Page {
     Overview,
     Games,
+    Plugins,
     Supported,
     Settings,
     /// Version and release notes; opened from the sidebar footer, not the nav list.
@@ -173,6 +175,7 @@ impl Page {
         match self {
             Page::Overview => "Overview",
             Page::Games => "Games",
+            Page::Plugins => "Plugins",
             Page::Supported => "Supported mice",
             Page::Settings => "Settings",
             Page::Updates => "Updates",
@@ -183,6 +186,7 @@ impl Page {
         match self {
             Page::Overview => IconName::LayoutDashboard,
             Page::Games => IconName::Gamepad2,
+            Page::Plugins => IconName::Blocks,
             Page::Supported => IconName::BookOpen,
             Page::Settings => IconName::Settings,
             Page::Updates => IconName::CircleArrowUp,
@@ -217,6 +221,9 @@ const SIDEBAR_COLLAPSED_W: f32 = 72.0;
 /// The community server, the same invite openmouse.app links to.
 const DISCORD_INVITE_URL: &str = "https://discord.gg/yxC9jzMdw6";
 
+/// The product site, linked from the Discord plugin's detail view.
+const OPENMOUSE_SITE_URL: &str = "https://openmouse.app";
+
 /// The Discord glyph (drawn in the theme colour by `themed_discord`), embedded so
 /// there is no file to ship or find at runtime.
 static DISCORD_SVG: &str = include_str!("../assets/discord.svg");
@@ -241,6 +248,18 @@ fn themed_discord(color: Hsla) -> std::sync::Arc<Image> {
     image
 }
 
+/// "just now", "12 min ago", "1 h 5 min ago" for a battery sample.
+fn battery_age(at: std::time::Instant) -> String {
+    let secs = at.elapsed().as_secs();
+    if secs < 60 {
+        "just now".to_string()
+    } else if secs < 3600 {
+        format!("{} min ago", secs / 60)
+    } else {
+        format!("{} h {} min ago", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
 /// The selected device's detail card (battery bar, DPI, polling rate,
 /// firmware) under the grid. Hidden until per-device menus exist to hold it.
 const SHOW_DEVICE_DETAILS: bool = false;
@@ -260,6 +279,12 @@ struct Devices {
     /// X and Y DPI edited separately (mice with separate axes); linked by default,
     /// since a single number on screen hides a differing Y.
     unlinked_axes: bool,
+    /// The Sensitivity card's segmented view: false = on-device stages,
+    /// true = single-DPI presets.
+    dpi_single: bool,
+    /// Device the Single view's rows belong to, and their current values.
+    single_dpi_device: Option<String>,
+    single_dpi_values: Vec<f64>,
     tab: DeviceTab,
     /// Stored profiles of the open Logitech device, once read (on demand).
     onboard: Option<crate::hid::OnboardProfiles>,
@@ -301,6 +326,7 @@ impl Staged {
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
 enum DeviceTab {
     #[default]
+    Overview,
     Performance,
     Buttons,
     Lighting,
@@ -312,6 +338,7 @@ enum DeviceTab {
 impl DeviceTab {
     fn label(self) -> &'static str {
         match self {
+            DeviceTab::Overview => "Overview",
             DeviceTab::Performance => "Performance",
             DeviceTab::Buttons => "Buttons",
             DeviceTab::Lighting => "Lighting",
@@ -468,6 +495,8 @@ pub struct AppView {
     profiles: crate::profiles::Profiles,
     /// Game whose profile is being edited on the Games page.
     profile_editor: Option<String>,
+    /// Plugin whose detail view is open on the Plugins page (`"discord"`).
+    plugin_open: Option<String>,
     /// One per (game, device) whose profile is currently in control.
     profile_overrides: Vec<ProfileOverride>,
     /// (game, device) pairs with a write in flight, so none is applied twice.
@@ -485,6 +514,10 @@ pub struct AppView {
     overlay: Option<AnyWindowHandle>,
     /// Newest scheduled presence update wins (Discord rate-limits them).
     presence_seq: u64,
+    /// Battery samples per device (`battery %` over time), session-scoped.
+    battery_history: std::collections::HashMap<String, std::collections::VecDeque<(std::time::Instant, f64)>>,
+    /// Device key + sample index the pointer is over on the battery chart.
+    battery_hover: Option<(String, usize)>,
     /// Last failure from the Launch-on-startup / Discord switches, shown under them.
     startup_error: Option<String>,
     discord_error: Option<String>,
@@ -497,6 +530,10 @@ pub struct AppView {
     /// What a slider shows while it is being dragged, before the write lands.
     slider_live: std::collections::HashMap<String, f64>,
     slider_seq: u64,
+    /// Sensitivity Single view: a slider and typed value per preset row
+    /// (`<device>/single/<index>`); values live on `Devices::single_dpi_values`.
+    dpi_sliders: std::collections::HashMap<String, Entity<SliderState>>,
+    dpi_inputs: std::collections::HashMap<String, Entity<InputState>>,
     _subscriptions: Vec<Subscription>,
     _game_watcher: Option<crate::game_watcher::GameWatcher>,
     /// Cached ASCII background rows, keyed by their grid dimensions.
@@ -622,6 +659,7 @@ impl AppView {
             presence: Default::default(),
             profiles: Default::default(),
             profile_editor: None,
+            plugin_open: None,
             profile_overrides: Vec::new(),
             profile_inflight: Vec::new(),
             profile_device: None,
@@ -632,6 +670,8 @@ impl AppView {
             checking_for_updates: false,
             overlay: None,
             presence_seq: 0,
+            battery_history: Default::default(),
+            battery_hover: None,
             startup_error: None,
             discord_error: None,
             badge_hovered: false,
@@ -640,6 +680,8 @@ impl AppView {
             control_sliders: Default::default(),
             slider_live: Default::default(),
             slider_seq: 0,
+            dpi_sliders: Default::default(),
+            dpi_inputs: Default::default(),
             _subscriptions: vec![sub_opacity, sub_vibrancy, sub_activity],
             _game_watcher: Some(game_watcher),
             ascii_rows: Vec::new(),
@@ -653,6 +695,26 @@ impl AppView {
             view.set_discord(true, cx);
         }
         view.scan_devices(cx);
+        // Battery history grows even while the window sits idle: render only
+        // runs on events, so take a sample once a minute ourselves.
+        cx.spawn(async move |view, cx| {
+            loop {
+                // Battery drains slowly; waking every five minutes is plenty and
+                // costs no HID traffic (the sample comes from the last status).
+                cx.background_executor().timer(Duration::from_secs(300)).await;
+                if view
+                    .update(cx, |view, cx| {
+                        if view.record_battery_samples() {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
         view
     }
 
@@ -670,6 +732,8 @@ impl Default for AppView {
             control_sliders: Default::default(),
             slider_live: Default::default(),
             slider_seq: 0,
+            dpi_sliders: Default::default(),
+            dpi_inputs: Default::default(),
             sidebar_collapsed: false,
             settings: Settings::default(),
             games: Vec::new(),
@@ -678,6 +742,7 @@ impl Default for AppView {
             presence: Default::default(),
             profiles: Default::default(),
             profile_editor: None,
+            plugin_open: None,
             profile_overrides: Vec::new(),
             profile_inflight: Vec::new(),
             profile_device: None,
@@ -688,6 +753,8 @@ impl Default for AppView {
             checking_for_updates: false,
             overlay: None,
             presence_seq: 0,
+            battery_history: Default::default(),
+            battery_hover: None,
             startup_error: None,
             discord_error: None,
             badge_hovered: false,
@@ -703,6 +770,39 @@ impl Default for AppView {
 }
 
 impl AppView {
+    /// One battery sample per device per five minutes (or on a ≥1% change),
+    /// kept for the session so the Overview tab can draw a usage graph.
+    /// Returns whether anything was recorded.
+    fn record_battery_samples(&mut self) -> bool {
+        let samples: Vec<(String, f64)> = self
+            .devices
+            .tiles
+            .iter()
+            .filter_map(|tile| match &tile.status {
+                TileStatus::Connected(r) => r.battery.map(|battery| (tile.key.clone(), battery)),
+                _ => None,
+            })
+            .collect();
+        let mut recorded = false;
+        for (key, battery) in samples {
+            let history = self.battery_history.entry(key).or_default();
+            let due = match history.back() {
+                Some((at, last)) => {
+                    at.elapsed() >= std::time::Duration::from_secs(300) || (*last - battery).abs() >= 1.0
+                }
+                None => true,
+            };
+            if due {
+                history.push_back((std::time::Instant::now(), battery));
+                while history.len() > 240 {
+                    history.pop_front();
+                }
+                recorded = true;
+            }
+        }
+        recorded
+    }
+
     /// What Rich Presence should say right now, from the settings and state:
     /// the game being played (top line) and the mouse and its stats (second line).
     fn presence_text(&self) -> (String, String) {
@@ -902,7 +1002,7 @@ impl AppView {
         self.devices.selected = index;
         self.devices.staged = Staged::default();
         self.devices.unlinked_axes = false;
-        self.devices.tab = DeviceTab::Performance;
+        self.devices.tab = DeviceTab::Overview;
         self.devices.expanded = None;
         self.devices.onboard = None;
         self.devices.write_error = None;
@@ -2160,7 +2260,12 @@ impl AppView {
         let accent = cx.theme().primary;
 
         let mut nav = div().flex().flex_col().gap_1();
-        for (id, page) in [("nav-overview", Page::Overview), ("nav-games", Page::Games), ("nav-supported", Page::Supported)] {
+        for (id, page) in [
+            ("nav-overview", Page::Overview),
+            ("nav-games", Page::Games),
+            ("nav-plugins", Page::Plugins),
+            ("nav-supported", Page::Supported),
+        ] {
             nav = nav.child(self.nav_row(id, page.icon(), page.label(), self.page == page, collapsed, cx).on_click(
                 cx.listener(move |this, _, _, cx| {
                     // Choosing the page you are on goes back to its top level.
@@ -2296,6 +2401,9 @@ impl AppView {
     }
 
     fn render_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if self.page == Page::Plugins {
+            return self.render_plugins(window, cx);
+        }
         if self.page == Page::Settings {
             return self.render_settings(window, cx);
         }
@@ -2376,17 +2484,28 @@ impl AppView {
         on_click: impl Fn(&mut Self, &mut Context<Self>) + 'static,
     ) -> Stateful<Div> {
         let primary = cx.theme().primary;
+        let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground;
+        let border = cx.theme().border;
         div()
             .id(SharedString::from(id))
             .cursor_pointer()
+            .flex()
+            .items_center()
+            .justify_center()
+            .min_w(px(44.))
             .px_3()
             .py_1p5()
-            .rounded_md()
+            .rounded_full()
             .border_1()
             .text_sm()
-            .border_color(if selected { primary } else { cx.theme().border })
-            .when(selected, |this| this.bg(Hsla { a: 0.14, ..primary }))
-            .text_color(if selected { cx.theme().foreground } else { cx.theme().muted_foreground })
+            .border_color(if selected { primary } else { Hsla { a: 0.55, ..border } })
+            .when(selected, |this| this.bg(Hsla { a: 0.16, ..primary }).text_color(fg))
+            .when(!selected, |this| {
+                this.bg(Hsla { a: 0.04, ..fg })
+                    .text_color(muted)
+                    .hover(|style| style.bg(Hsla { a: 0.09, ..fg }).text_color(fg))
+            })
             .child(label)
             .on_click(cx.listener(move |this, _, _, cx| on_click(this, cx)))
     }
@@ -2459,6 +2578,108 @@ impl AppView {
         }
     }
 
+    /// Seeds the Sensitivity Single view from the device's presets and mints a
+    /// slider + typed number field per row (`<device>/single/<index>`). Values
+    /// are local picks: dragging or typing only edits the row; clicking Use
+    /// writes the DPI.
+    fn ensure_single_dpi(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tile) = self.devices.tiles.get(self.devices.selected) else { return };
+        let TileStatus::Connected(r) = &tile.status else { return };
+        let Some(controls) = r.controls.as_ref() else { return };
+        let device = tile.key.clone();
+        let current = r.dpi.unwrap_or(0.0);
+        let (min, max) = (controls.dpi.min, controls.dpi.max);
+        let step = controls.dpi.step.max(1.0);
+
+        if self.devices.single_dpi_device.as_deref() != Some(device.as_str()) {
+            let mut values: Vec<f64> = controls
+                .dpi_presets
+                .iter()
+                .copied()
+                .filter(|preset| *preset >= min && *preset <= max)
+                .take(4)
+                .collect();
+            if current > 0.0 && !values.iter().any(|preset| (preset - current).abs() < 0.5) {
+                values.insert(0, current);
+            }
+            values.truncate(4);
+            while values.len() < 4 {
+                let last = values.last().copied().unwrap_or(current.max(min));
+                values.push(last);
+            }
+            self.devices.single_dpi_values = values;
+            self.devices.single_dpi_device = Some(device.clone());
+        }
+
+        for index in 0..4 {
+            let key = format!("{device}/single/{index}");
+            if self.dpi_sliders.contains_key(&key) {
+                continue;
+            }
+            let value = self.devices.single_dpi_values.get(index).copied().unwrap_or(current).clamp(min, max);
+            let slider = cx.new(|_| {
+                SliderState::new()
+                    .min(0.0)
+                    .max((max - min) as f32)
+                    .step(step as f32)
+                    .default_value((value - min) as f32)
+            });
+            let input = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .default_value(format!("{value:.0}"))
+                    .step(step)
+                    .min(min)
+                    .max(max)
+            });
+
+            let sub_slider = cx.subscribe_in(&slider, window, {
+                let key = key.clone();
+                move |this: &mut Self, _state, event: &SliderEvent, window, cx| {
+                    let raw = match event {
+                        SliderEvent::Change(value) | SliderEvent::Release(value) => value.end() as f64,
+                    };
+                    let real = (min + raw).clamp(min, max);
+                    let snapped = (min + ((real - min) / step).round() * step).clamp(min, max);
+                    if let Some(slot) = this.devices.single_dpi_values.get_mut(index) {
+                        *slot = snapped;
+                    }
+                    if let Some(input) = this.dpi_inputs.get(&key) {
+                        input.update(cx, |state, cx| {
+                            state.set_value(SharedString::from(format!("{snapped:.0}")), window, cx);
+                        });
+                    }
+                    cx.notify();
+                }
+            });
+            let sub_input = cx.subscribe_in(&input, window, {
+                let key = key.clone();
+                move |this: &mut Self, input, event: &InputEvent, window, cx| {
+                    if !matches!(event, InputEvent::Change) {
+                        return;
+                    }
+                    let Ok(raw) = input.read(cx).value().trim().parse::<f64>() else {
+                        return;
+                    };
+                    let snapped = (min + ((raw - min) / step).round() * step).clamp(min, max);
+                    if let Some(slot) = this.devices.single_dpi_values.get_mut(index) {
+                        *slot = snapped;
+                    }
+                    if let Some(slider) = this.dpi_sliders.get(&key) {
+                        slider.update(cx, |state, cx| {
+                            state.set_value((snapped - min) as f32, window, cx);
+                        });
+                    }
+                    cx.notify();
+                }
+            });
+
+            self.dpi_inputs.insert(key.clone(), input);
+            self.dpi_sliders.insert(key, slider);
+            self._subscriptions.push(sub_slider);
+            self._subscriptions.push(sub_input);
+        }
+    }
+
     /// A slider for a Buttons/Advanced/Performance control: accent-filled track
     /// and thumb, with its value in a fixed-width pill so rows line up.
     fn control_slider_row(slider: Option<Entity<SliderState>>, value: String, cx: &mut Context<Self>) -> AnyElement {
@@ -2468,16 +2689,17 @@ impl AppView {
         h_flex()
             .gap_3()
             .items_center()
-            .children(slider.map(|s| div().w(px(220.)).child(Slider::new(&s).bg(accent).text_color(fg))))
+            .justify_end()
+            .children(slider.map(|s| div().w(px(200.)).child(Slider::new(&s).bg(accent).text_color(fg))))
             .child(
                 div()
-                    .min_w(px(84.))
+                    .w(px(92.))
                     .px_2()
                     .py_1()
                     .rounded_md()
                     .border_1()
-                    .border_color(Hsla { a: 0.7, ..border })
-                    .bg(Hsla { a: 0.05, ..fg })
+                    .border_color(Hsla { a: 0.45, ..border })
+                    .bg(Hsla { a: 0.07, ..fg })
                     .text_sm()
                     .text_center()
                     .text_color(fg)
@@ -2594,9 +2816,15 @@ impl AppView {
                 .child(c.current.as_str().map(str::to_string).unwrap_or_else(|| c.current.to_string()))
                 .into_any_element(),
         };
-        let row = h_flex().gap_4().items_center().justify_between().child(label_block).child(control);
+        let row = h_flex()
+            .gap_6()
+            .items_center()
+            .justify_between()
+            .py_3()
+            .child(label_block)
+            .child(div().flex_none().max_w(px(360.)).flex().justify_end().child(control));
         match unfolded {
-            Some(options) => div().flex().flex_col().gap_2().child(row).child(options).into_any_element(),
+            Some(options) => div().flex().flex_col().gap_2().pb_3().child(row).child(options).into_any_element(),
             None => row.into_any_element(),
         }
     }
@@ -2610,6 +2838,7 @@ impl AppView {
         let fg = cx.theme().foreground;
         let muted = cx.theme().muted_foreground;
         let border = cx.theme().border;
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
         let onboard_mode = r.mode.as_deref() == Some("Onboard");
         let mut col = div().flex().flex_col().gap_3().flex_1().min_w_0().max_w(px(720.));
         let note = |text: &str| div().text_sm().text_color(muted).child(text.to_string());
@@ -2655,6 +2884,7 @@ impl AppView {
             .rounded_lg()
             .border_1()
             .border_color(border)
+            .bg(card_bg)
             .child(
                 div()
                     .text_sm()
@@ -2706,7 +2936,15 @@ impl AppView {
         let onboard_mode = r.mode.as_deref() == Some("Onboard");
         let busy = self.devices.writing.is_some();
         let card = || {
-            div().flex().flex_col().gap_2().p_4().rounded_lg().border_1().border_color(border)
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .p_4()
+                .rounded_lg()
+                .border_1()
+                .border_color(border)
+                .bg(Hsla { a: 0.72, ..cx.theme().background })
         };
         let mut col = div().flex().flex_col().gap_3().flex_1().min_w_0().max_w(px(720.));
 
@@ -2826,12 +3064,397 @@ impl AppView {
         col.into_any_element()
     }
 
+    /// The default device tab: the handful of settings people change most
+    /// (sensitivity, polling rate, lift-off, surface), plus the device's
+    /// firmware versions and a place for the updater to land.
+    fn render_overview_tab(&self, key: &str, r: &DeviceReadout, cx: &mut Context<Self>) -> AnyElement {
+        let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground;
+        let border = cx.theme().border;
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
+        let staged = &self.devices.staged;
+        let current = r.dpi.unwrap_or(0.0);
+        let (min, max, step) = r
+            .controls
+            .as_ref()
+            .map(|c| (c.dpi.min, c.dpi.max, c.dpi.step.max(1.0)))
+            .unwrap_or((10.0, 26000.0, 50.0));
+
+        let card = |title: &str| {
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .p_4()
+                .rounded_lg()
+                .border_1()
+                .border_color(border)
+                .bg(card_bg)
+                .child(
+                    div()
+                        .pb_2()
+                        .border_b_1()
+                        .border_color(Hsla { a: 0.55, ..border })
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(muted)
+                                .child(title.to_uppercase()),
+                        ),
+                )
+        };
+        let labeled = |label: &str, control: AnyElement| {
+            h_flex()
+                .items_center()
+                .justify_between()
+                .gap_4()
+                .child(div().text_sm().text_color(fg).child(label.to_string()))
+                .child(control)
+        };
+        // Chip groups read better with the label above them than squeezed
+        // beside a two-row wrap.
+        let stacked = |label: &str, control: AnyElement| {
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(div().text_sm().text_color(fg).child(label.to_string()))
+                .child(control)
+        };
+        let accent = cx.theme().primary;
+        let read_only_pill = move |label: String, selected: bool| {
+            div()
+                .px_3()
+                .py_1p5()
+                .rounded_full()
+                .border_1()
+                .text_sm()
+                .border_color(if selected { accent } else { Hsla { a: 0.55, ..border } })
+                .when(selected, |this| this.bg(Hsla { a: 0.16, ..accent }).text_color(fg))
+                .when(!selected, |this| this.text_color(muted))
+                .child(label)
+        };
+
+        let mut col = div().flex().flex_col().gap_3().flex_1().min_w_0().max_w(px(720.));
+
+        // Quick settings: only what the device reports it can do.
+        let has_dpi = r.dpi.is_some_and(|dpi| dpi > 0.0) && r.controls.is_some();
+        let has_polling = !r.polling_rates.is_empty();
+        let has_lod = !r.lod_options.is_empty();
+        let has_surface = r.surface.is_some()
+            && r.controls.as_ref().is_some_and(|c| !c.surface_modes.is_empty());
+        let mut quick = card("Quick settings");
+        if has_dpi {
+            let shown = staged.dpi.unwrap_or(current);
+            let dpi_down = Button::new("quick-dpi-down")
+                .compact()
+                .label("−")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let base = this.devices.staged.dpi.unwrap_or(current);
+                    this.edit_dpi((base - step).clamp(min, max), None, cx);
+                }));
+            let dpi_up = Button::new("quick-dpi-up")
+                .compact()
+                .label("+")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let base = this.devices.staged.dpi.unwrap_or(current);
+                    this.edit_dpi((base + step).clamp(min, max), None, cx);
+                }));
+            let dpi_control = h_flex()
+                .gap_3()
+                .items_center()
+                .child(dpi_down)
+                .child(
+                    div()
+                        .min_w(px(92.))
+                        .text_center()
+                        .text_2xl()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(fg)
+                        .child(format!("{shown:.0}")),
+                )
+                .child(dpi_up)
+                .into_any_element();
+            quick = quick
+                .child(labeled("Sensitivity (DPI)", dpi_control))
+                .child(div().text_xs().text_color(muted).child(format!("Now {current:.0} DPI")));
+            if let Some(c) = &r.controls {
+                let mut presets = h_flex().gap_2().flex_wrap();
+                for preset in c.dpi_presets.iter().copied().filter(|p| *p >= min && *p <= max).take(6) {
+                    presets = presets.child(self.chip(
+                        format!("quick-dpi-{preset}"),
+                        format!("{preset:.0}"),
+                        (shown - preset).abs() < 0.5,
+                        cx,
+                        move |this, cx| this.edit_dpi(preset, None, cx),
+                    ));
+                }
+                quick = quick.child(presets);
+            }
+        }
+        if !r.polling_rates.is_empty() {
+            let mut row = h_flex().gap_2().flex_wrap();
+            for rate in r.polling_rates.iter().copied() {
+                let selected = staged
+                    .polling
+                    .map(|rate_hz| rate_hz == rate)
+                    .unwrap_or((r.polling_hz.unwrap_or(0.0) - rate as f64).abs() < 0.5);
+                if r.polling_read_only {
+                    row = row.child(read_only_pill(format!("{rate} Hz"), selected));
+                } else {
+                    row = row.child(self.chip(
+                        format!("quick-poll-{rate}"),
+                        format!("{rate} Hz"),
+                        selected,
+                        cx,
+                        move |this, cx| this.edit("pollingRate", serde_json::json!(rate), cx),
+                    ));
+                }
+            }
+            quick = quick.child(stacked("Polling rate", row.into_any_element()));
+        }
+        if !r.lod_options.is_empty() {
+            let chosen = staged.lod.as_deref().or(r.lod.as_deref());
+            let mut row = h_flex().gap_2().flex_wrap();
+            for option in r.lod_options.iter().filter(|o| !(r.hide_lod_low && o.as_str() == "Low")).cloned() {
+                let selected = chosen == Some(option.as_str());
+                let sent = option.clone();
+                row = row.child(self.chip(
+                    format!("quick-lod-{option}"),
+                    option,
+                    selected,
+                    cx,
+                    move |this, cx| this.edit("liftOff", serde_json::json!(sent), cx),
+                ));
+            }
+            quick = quick.child(stacked("Lift-off distance", row.into_any_element()));
+        }
+        // `surface_modes` comes from a static list in the JS adapter; only a
+        // device that reports a current mode actually has this control.
+        if has_surface {
+            if let Some(c) = &r.controls {
+                let chosen = staged.surface.as_deref().or(r.surface.as_deref());
+                let mut row = h_flex().gap_2().flex_wrap();
+                for mode in c.surface_modes.iter().cloned() {
+                    let selected = chosen == Some(mode.as_str());
+                    let sent = mode.clone();
+                    row = row.child(self.chip(
+                        format!("quick-surface-{mode}"),
+                        mode,
+                        selected,
+                        cx,
+                        move |this, cx| this.edit("surface", serde_json::json!(sent), cx),
+                    ));
+                }
+                quick = quick.child(stacked("Gaming surface", row.into_any_element()));
+            }
+        }
+        if has_dpi || has_polling || has_lod || has_surface {
+            col = col.child(quick);
+        }
+
+        // Device facts.
+        let mut device = card("Device");
+        if let Some(connection) = &r.connection {
+            device = device.child(labeled(
+                "Connection",
+                div().text_sm().text_color(fg).child(connection.clone()).into_any_element(),
+            ));
+        }
+        if let Some(battery) = r.battery {
+            device = device.child(labeled(
+                "Battery",
+                div()
+                    .text_sm()
+                    .text_color(fg)
+                    .child(format!("{battery:.0}%{}", if r.charging { " · charging" } else { "" }))
+                    .into_any_element(),
+            ));
+        }
+        if let Some(mode) = &r.mode {
+            device = device.child(labeled(
+                "Memory mode",
+                div().text_sm().text_color(fg).child(mode.clone()).into_any_element(),
+            ));
+        }
+        if r.connection.is_some() || r.battery.is_some() || r.mode.is_some() {
+            col = col.child(device);
+        }
+
+        // Battery usage over this session: one thin bar per sample, with a
+        // hover point that shows the exact level and age.
+        let history: Vec<(f64, std::time::Instant)> = self
+            .battery_history
+            .get(key)
+            .map(|samples| samples.iter().map(|(at, battery)| (*battery, *at)).collect())
+            .unwrap_or_default();
+        if history.len() >= 2 {
+            let count = history.len();
+            let hovered = self
+                .battery_hover
+                .as_ref()
+                .filter(|(device, _)| device == key)
+                .and_then(|(_, index)| history.get(*index).map(|point| (*index, *point)));
+            let last = history.last().map(|(battery, _)| *battery).unwrap_or(0.0);
+            let header_value = match hovered {
+                Some((_, (battery, at))) => format!("{battery:.0}% · {}", battery_age(at)),
+                None => format!("{last:.0}%{}", if r.charging { " · charging" } else { "" }),
+            };
+            let mut chart = div()
+                .relative()
+                .h(px(96.))
+                .w_full()
+                .rounded_md()
+                .bg(Hsla { a: 0.05, ..fg })
+                .overflow_hidden();
+            for level in [25.0f32, 50.0, 75.0] {
+                chart = chart.child(
+                    div()
+                        .absolute()
+                        .left(px(0.))
+                        .right(px(0.))
+                        .bottom(relative(level / 100.0))
+                        .h(px(1.))
+                        .bg(Hsla { a: 0.25, ..border }),
+                );
+            }
+            let line_points: Vec<(f32, f32)> = history
+                .iter()
+                .enumerate()
+                .map(|(index, (battery, _))| {
+                    (
+                        index as f32 / (count - 1) as f32,
+                        (battery / 100.0).clamp(0.0, 1.0) as f32,
+                    )
+                })
+                .collect();
+            let stroke = accent;
+            chart = chart.child(
+                canvas(
+                    {
+                        let points = line_points.clone();
+                        move |_bounds, _window, _cx| points
+                    },
+                    move |bounds, points, window, _cx| {
+                        let width = bounds.size.width.as_f32();
+                        let height = bounds.size.height.as_f32();
+                        for pair in points.windows(2) {
+                            let (x0, y0) = (
+                                bounds.origin.x.as_f32() + pair[0].0 * width,
+                                bounds.origin.y.as_f32() + (1.0 - pair[0].1) * height,
+                            );
+                            let (x1, y1) = (
+                                bounds.origin.x.as_f32() + pair[1].0 * width,
+                                bounds.origin.y.as_f32() + (1.0 - pair[1].1) * height,
+                            );
+                            let (dx, dy) = (x1 - x0, y1 - y0);
+                            let steps = ((dx.abs().max(dy.abs())) / 1.5).ceil().max(1.0) as usize;
+                            for step in 0..=steps {
+                                let t = step as f32 / steps as f32;
+                                window.paint_quad(fill(
+                                    Bounds {
+                                        origin: point(px(x0 + dx * t), px(y0 + dy * t)),
+                                        size: size(px(2.2), px(2.2)),
+                                    },
+                                    stroke,
+                                ));
+                            }
+                        }
+                    },
+                )
+                .absolute()
+                .left(px(0.))
+                .top(px(0.))
+                .size_full(),
+            );
+            for (index, (battery, _)) in history.iter().enumerate() {
+                let x = index as f32 / (count - 1) as f32;
+                let level = (battery / 100.0).clamp(0.0, 1.0) as f32;
+                let device_key = key.to_string();
+                chart = chart.child(
+                    div()
+                        .id(SharedString::from(format!("battery-point-{device_key}-{index}")))
+                        .absolute()
+                        .left(relative(x))
+                        .bottom(relative(level))
+                        .ml(px(-6.))
+                        .mb(px(-6.))
+                        .size(px(14.))
+                        .cursor_pointer()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(div().size(px(6.)).rounded_full().bg(accent))
+                        .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                            if *hovered {
+                                this.battery_hover = Some((device_key.clone(), index));
+                            } else if this
+                                .battery_hover
+                                .as_ref()
+                                .is_some_and(|(device, at)| device == &device_key && *at == index)
+                            {
+                                this.battery_hover = None;
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+            col = col.child(
+                card("Battery")
+                    .child(
+                        h_flex()
+                            .items_start()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_0p5()
+                                    .child(div().text_sm().text_color(fg).child("Battery usage"))
+                                    .child(div().text_xs().text_color(muted).child("Session samples, oldest to newest.")),
+                            )
+                            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(fg).child(header_value)),
+                    )
+                    .child(chart),
+            );
+        }
+
+        // Firmware: only when the device reports versions; update checks land here.
+        if !r.firmware.is_empty() {
+            let mut firmware = card("Firmware");
+            for line in &r.firmware {
+                firmware = firmware.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_4()
+                        .child(div().text_sm().text_color(muted).child("Installed"))
+                        .child(div().text_sm().text_color(fg).child(line.clone())),
+                );
+            }
+            firmware = firmware
+                .child(h_flex().child(
+                    Button::new("firmware-check")
+                        .compact()
+                        .label("Check for updates")
+                        .disabled(true),
+                ))
+                .child(div().text_xs().text_color(muted).child("Firmware update checks will appear here."));
+            col = col.child(firmware);
+        }
+
+        col.into_any_element()
+    }
+
     /// The Buttons, Lighting and Advanced tabs. Controls come from the shared
     /// JS (`js/controls.ts`), so any brand's extras appear without Rust knowing them.
     fn render_extra_tab(&self, r: &DeviceReadout, cx: &mut Context<Self>) -> AnyElement {
         let fg = cx.theme().foreground;
         let muted = cx.theme().muted_foreground;
         let border = cx.theme().border;
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
         let busy = self.devices.writing.is_some();
         if self.devices.tab == DeviceTab::Profiles {
             return self.render_onboard_profiles(r, cx);
@@ -2859,14 +3482,34 @@ impl AppView {
                 let mut card = div()
                     .flex()
                     .flex_col()
-                    .gap_3()
                     .p_4()
                     .rounded_lg()
                     .border_1()
                     .border_color(border)
-                    .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(fg).child(section.title.clone()));
-                for control in &section.controls {
-                    card = card.child(self.render_control(control, cx));
+                    .bg(card_bg)
+                    .child(
+                        div()
+                            .pb_2()
+                            .mb_1()
+                            .border_b_1()
+                            .border_color(Hsla { a: 0.6, ..border })
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(muted)
+                                    .child(section.title.to_uppercase()),
+                            ),
+                    );
+                let last = section.controls.len().saturating_sub(1);
+                for (index, control) in section.controls.iter().enumerate() {
+                    card = card.child(
+                        div()
+                            .when(index < last, |this| {
+                                this.border_b_1().border_color(Hsla { a: 0.35, ..border })
+                            })
+                            .child(self.render_control(control, cx)),
+                    );
                 }
                 col = col.child(card);
             }
@@ -2883,6 +3526,7 @@ impl AppView {
                     .rounded_lg()
                     .border_1()
                     .border_color(border)
+                    .bg(card_bg)
                     .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(fg).child(title.to_string()))
             };
             if spec.write_only {
@@ -2967,6 +3611,313 @@ impl AppView {
         col.into_any_element()
     }
 
+    /// The Sensitivity card from the web app: a Stages/Single switch, the
+    /// current DPI, one row per on-device stage with its own enable tick, stage
+    /// number (click to make active), DPI value and slider, or a compact list
+    /// of single-DPI presets. Only rendered for devices that publish a DPI
+    /// stage editor in `perf.*`.
+    fn render_stage_sensitivity(&self, tile: &Tile, r: &DeviceReadout, cx: &mut Context<Self>) -> AnyElement {
+        let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground;
+        let border = cx.theme().border;
+        let accent = cx.theme().primary;
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
+        let controls: Vec<&crate::hid::ControlSpec> =
+            r.tabs.performance.iter().flat_map(|s| s.controls.iter()).collect();
+        let count = controls.iter().find(|c| c.id == "perf.dpiStageCount");
+        let active_control = controls.iter().find(|c| c.id == "perf.dpiStage");
+        let mut stages: Vec<(usize, &crate::hid::ControlSpec)> = controls
+            .iter()
+            .filter_map(|c| {
+                c.id.strip_prefix("perf.dpiStageValue.")
+                    .and_then(|n| n.parse::<usize>().ok())
+                    .map(|index| (index, *c))
+            })
+            .collect();
+        stages.sort_by_key(|(index, _)| *index);
+        let max_stages = count.map(|c| c.options.len().max(1)).unwrap_or(stages.len()).max(1);
+        let active = active_control
+            .and_then(|c| c.current.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(0);
+        let current = r.dpi.unwrap_or(0.0);
+        let single = self.devices.dpi_single;
+
+        let segmented = {
+            let mut row = h_flex().gap_1().p_1().rounded_full().bg(Hsla { a: 0.05, ..fg });
+            row = row.child(self.chip(
+                "dpi-view-stages".into(),
+                "Stages".into(),
+                !single,
+                cx,
+                |this, cx| {
+                    this.devices.dpi_single = false;
+                    cx.notify();
+                },
+            ));
+            row = row.child(self.chip(
+                "dpi-view-single".into(),
+                "Single".into(),
+                single,
+                cx,
+                |this, cx| {
+                    this.devices.dpi_single = true;
+                    cx.notify();
+                },
+            ));
+            row
+        };
+
+        let header = h_flex()
+            .items_center()
+            .justify_between()
+            .gap_4()
+            .child(
+                h_flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .size(px(40.))
+                            .flex_none()
+                            .rounded_full()
+                            .bg(Hsla { a: 0.14, ..accent })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_base()
+                            .text_color(accent)
+                            .child("◎"),
+                    )
+                    .child(div().text_base().font_weight(FontWeight::SEMIBOLD).text_color(fg).child("Sensitivity"))
+                    .child(segmented),
+            )
+            .child(
+                div()
+                    .text_3xl()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(fg)
+                    .child(format!("{current:.0} DPI")),
+            );
+
+        let mut card = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .p_4()
+            .rounded_lg()
+            .border_1()
+            .border_color(border)
+            .bg(card_bg)
+            .child(header);
+
+        if single {
+            // Local picks: the typed field and slider edit a row; Use writes it.
+            let (min, max) = r
+                .controls
+                .as_ref()
+                .map(|c| (c.dpi.min, c.dpi.max))
+                .unwrap_or((10.0, 26000.0));
+            let mut values = self.devices.single_dpi_values.clone();
+            if values.len() != 4 {
+                values = r
+                    .controls
+                    .as_ref()
+                    .map(|c| c.dpi_presets.iter().copied().take(4).collect())
+                    .unwrap_or_default();
+                while values.len() < 4 {
+                    values.push(current.max(min));
+                }
+                values.truncate(4);
+            }
+            let used = values.iter().filter(|value| (**value - current).abs() < 0.5).count();
+            card = card.child(
+                h_flex()
+                    .justify_between()
+                    .child(div().text_sm().text_color(muted).child("Presets in use"))
+                    .child(div().text_sm().text_color(muted).child(format!("{used} / 4"))),
+            );
+            for (index, value) in values.iter().copied().enumerate() {
+                let value = value.clamp(min, max);
+                let selected = (value - current).abs() < 0.5;
+                let key = format!("{}/single/{index}", tile.key);
+                let input = self.dpi_inputs.get(&key).cloned();
+                let slider = self.dpi_sliders.get(&key).cloned();
+                let number: AnyElement = match input {
+                    Some(state) => NumberInput::new(&state).w(px(104.)).into_any_element(),
+                    None => div()
+                        .w(px(96.))
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(Hsla { a: 0.45, ..border })
+                        .bg(Hsla { a: 0.07, ..fg })
+                        .text_sm()
+                        .text_center()
+                        .text_color(fg)
+                        .child(format!("{value:.0}"))
+                        .into_any_element(),
+                };
+                let track: AnyElement = match slider {
+                    Some(state) => div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Slider::new(&state).bg(accent).text_color(fg))
+                        .into_any_element(),
+                    None => div().flex_1().into_any_element(),
+                };
+                let use_button = Button::new(SharedString::from(format!("dpi-use-{index}")))
+                    .compact()
+                    .label(if selected { "In use" } else { "Use" })
+                    .disabled(selected)
+                    .on_click(cx.listener(move |this, _, _, cx| this.edit_dpi(value, None, cx)))
+                    .into_any_element();
+                let row = div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .when(selected, |this| this.bg(Hsla { a: 0.10, ..accent }))
+                    .child(
+                        div()
+                            .size(px(18.))
+                            .flex_none()
+                            .rounded_sm()
+                            .border_1()
+                            .border_color(if selected { accent } else { border })
+                            .when(selected, |this| this.bg(accent))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_xs()
+                            .text_color(fg)
+                            .child(if selected { "✓" } else { "" }),
+                    )
+                    .child(div().w(px(20.)).text_sm().text_color(muted).child(format!("{}", index + 1)))
+                    .child(number)
+                    .child(track)
+                    .child(use_button);
+                card = card.child(row);
+            }
+            card = card
+                .child(div().text_xs().text_color(muted).child(
+                    "Type a DPI or drag a row's slider to edit that pick, then Use to put it on the mouse.",
+                ))
+                .child(div().text_xs().text_color(muted).child(format!("Current {current:.0} DPI")));
+            return card.into_any_element();
+        }
+
+        card = card.child(
+            h_flex()
+                .justify_between()
+                .child(div().text_sm().text_color(muted).child("Stages in use"))
+                .child(div().text_sm().text_color(muted).child(format!("{} / {max_stages}", stages.len()))),
+        );
+
+        for index in 0..max_stages {
+            let stage = stages.iter().find(|(i, _)| *i == index).map(|(_, c)| *c);
+            let enabled = stage.is_some();
+            let is_active = enabled && index == active;
+            let fallback = stages
+                .last()
+                .map(|(_, c)| c.current.as_f64().unwrap_or(current))
+                .unwrap_or(current);
+            let value = stage.and_then(|c| c.current.as_f64()).unwrap_or(fallback);
+            let control_id = stage.map(|c| c.id.clone()).unwrap_or_default();
+            let slider_key = format!("{}/{}", tile.key, control_id);
+            let live = self.slider_live.get(&slider_key).copied();
+            let shown = live.unwrap_or(value);
+            let slider = self.control_sliders.get(&slider_key).cloned();
+            let checkbox = div()
+                .id(SharedString::from(format!("dpi-stage-tick-{index}")))
+                .cursor_pointer()
+                .size(px(18.))
+                .flex_none()
+                .rounded_sm()
+                .border_1()
+                .border_color(if enabled { accent } else { border })
+                .when(enabled, |this| this.bg(accent))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_xs()
+                .text_color(fg)
+                .child(if enabled { "✓" } else { "" })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // Enabling this row includes every row up to it; disabling
+                    // drops it and any later ones. At least one stays.
+                    let next = if enabled { (index + 1).max(1) } else { index.max(1) };
+                    this.set_control("perf.dpiStageCount".into(), serde_json::json!(next), cx);
+                }));
+            let number = div()
+                .id(SharedString::from(format!("dpi-stage-pick-{index}")))
+                .cursor_pointer()
+                .size(px(26.))
+                .flex_none()
+                .rounded_md()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_sm()
+                .when(is_active, |this| this.bg(accent).text_color(fg).font_weight(FontWeight::SEMIBOLD))
+                .when(!is_active, |this| this.bg(Hsla { a: 0.06, ..fg }).text_color(muted))
+                .child(format!("{}", index + 1))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if enabled {
+                        this.set_control("perf.dpiStage".into(), serde_json::json!(index), cx);
+                    }
+                }));
+            let value_box = div()
+                .w(px(96.))
+                .flex_none()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .border_1()
+                .border_color(Hsla { a: 0.45, ..border })
+                .bg(Hsla { a: 0.07, ..fg })
+                .text_sm()
+                .text_center()
+                .text_color(if enabled { fg } else { muted })
+                .child(if enabled { format!("{shown:.0}") } else { format!("{value:.0}") });
+            let mut track = div().flex_1().min_w_0();
+            if let (true, Some(slider)) = (enabled, slider) {
+                track = track.child(Slider::new(&slider).bg(accent).text_color(fg));
+            } else {
+                track = track.child(
+                    div()
+                        .h(px(4.))
+                        .w_full()
+                        .rounded_full()
+                        .bg(Hsla { a: 0.08, ..fg }),
+                );
+            }
+            let row = div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .px_3()
+                .py_2()
+                .rounded_md()
+                .when(is_active, |this| this.bg(Hsla { a: 0.10, ..accent }))
+                .child(checkbox)
+                .child(number)
+                .child(value_box)
+                .child(track);
+            card = card.child(row);
+        }
+
+        card = card
+            .child(div().text_xs().text_color(muted).child(
+                "One row per DPI stage. Tick a row to include it in the DPI cycle; untick to disable it and keep the value for later. Click a number to make it the starting stage.",
+            ))
+            .child(div().text_xs().text_color(muted).child(format!("Current {current:.0} DPI")));
+        card.into_any_element()
+    }
+
     /// Per-device settings: sensitivity, polling rate, lift-off distance and
     /// gaming-surface mode, written through the shared protocol drivers.
     /// With instant apply off, edits are staged and the bottom bar applies them.
@@ -2975,6 +3926,9 @@ impl AppView {
         let fg = cx.theme().foreground;
         let muted = cx.theme().muted_foreground;
         let border = cx.theme().border;
+        // Cards sit over the ASCII field; without a surface the pattern runs
+        // through labels and reads as strikethrough.
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
         let busy = self.devices.writing.is_some();
         let staged = &self.devices.staged;
         let instant = self.settings.instant_apply;
@@ -3028,10 +3982,24 @@ impl AppView {
                 .rounded_lg()
                 .border_1()
                 .border_color(border)
-                .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(fg).child(title.to_string()))
+                .bg(card_bg)
+                .child(
+                    div()
+                        .pb_2()
+                        .border_b_1()
+                        .border_color(Hsla { a: 0.55, ..border })
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(muted)
+                                .child(title.to_uppercase()),
+                        ),
+                )
         };
 
         let content: AnyElement = match &tile.status {
+            TileStatus::Connected(r) if self.devices.tab == DeviceTab::Overview => self.render_overview_tab(&tile.key, r, cx),
             TileStatus::Connected(r) if self.devices.tab != DeviceTab::Performance => self.render_extra_tab(r, cx),
             TileStatus::Connected(r) => {
                 let mut col = div().flex().flex_col().gap_3().flex_1().min_w_0().max_w(px(720.));
@@ -3045,7 +4013,11 @@ impl AppView {
 
                 // Sensitivity. Hidden when the driver reports no real DPI (a
                 // control whose Apply would fail), as the Tauri tab does.
-                if let (Some(current), Some(c)) = (r.dpi.filter(|d| *d > 0.0), &r.controls) {
+                // A device with a writable DPI stage table gets the web app's
+                // Sensitivity card instead of the plain stepper.
+                if r.tabs.performance.iter().flat_map(|s| s.controls.iter()).any(|c| c.id == "perf.dpiStageCount") {
+                    col = col.child(self.render_stage_sensitivity(tile, r, cx));
+                } else if let (Some(current), Some(c)) = (r.dpi.filter(|d| *d > 0.0), &r.controls) {
                     let unlinked = r.separate_axes && self.devices.unlinked_axes;
                     let cur_y = r.dpi_y.unwrap_or(current);
                     let x_now = staged.dpi.unwrap_or(current);
@@ -3208,9 +4180,25 @@ impl AppView {
                 // debounce, low-power threshold, USB speed, primary button…), from the
                 // shared JS with the Tauri tab's own gating. These apply immediately.
                 for group in &r.tabs.performance {
+                    // The stage table has its own Sensitivity card above.
+                    let controls: Vec<&crate::hid::ControlSpec> = group
+                        .controls
+                        .iter()
+                        .filter(|c| !c.id.starts_with("perf.dpiStage"))
+                        .collect();
+                    if controls.is_empty() {
+                        continue;
+                    }
                     let mut card = section(&group.title);
-                    for control in &group.controls {
-                        card = card.child(self.render_control(control, cx));
+                    let last = controls.len().saturating_sub(1);
+                    for (index, control) in controls.iter().enumerate() {
+                        card = card.child(
+                            div()
+                                .when(index < last, |this| {
+                                    this.border_b_1().border_color(Hsla { a: 0.35, ..border })
+                                })
+                                .child(self.render_control(control, cx)),
+                        );
                     }
                     col = col.child(card);
                 }
@@ -3239,6 +4227,10 @@ impl AppView {
         };
         let sidebar = if self.sidebar_collapsed { SIDEBAR_COLLAPSED_W } else { SIDEBAR_W };
         let art_side = ((view_width - sidebar - 2.0 * PAGE_PAD) * 0.36).clamp(260.0, 520.0);
+        // The controls column takes what the fixed artwork column leaves; a
+        // window narrower than artwork + 720 px used to let it overflow the
+        // right edge instead of shrinking.
+        let controls_w = (view_width - sidebar - 2.0 * PAGE_PAD - art_side - 24.0).clamp(320.0, 720.0);
 
         let mut tab_bar = h_flex().gap_1();
         // Only tabs this device has something for: Buttons if its driver (or a
@@ -3254,6 +4246,7 @@ impl AppView {
             _ => (false, false, false, false),
         };
         let tabs: Vec<DeviceTab> = [
+            (DeviceTab::Overview, true),
             (DeviceTab::Performance, true),
             (DeviceTab::Buttons, has_buttons),
             (DeviceTab::Lighting, has_lighting),
@@ -3334,13 +4327,14 @@ impl AppView {
                     .size_full()
                     .p_4()
                     .gap_4()
-                    .when(show_bar, |this| this.pb(px(96.)))
-                    .overflow_y_scrollbar()
                     .child(header)
                     .child(
                         h_flex()
                             .gap_6()
                             .items_start()
+                            .w_full()
+                            .flex_1()
+                            .min_h_0()
                             .child(
                                 div()
                                     .flex()
@@ -3354,16 +4348,28 @@ impl AppView {
                                     }),
                             )
                             // Tabs sit directly over the controls they switch.
+                            // Only this column scrolls: the title, artwork and
+                            // back button stay put, as on the Overview page.
                             .child(
                                 div()
                                     .flex()
                                     .flex_col()
                                     .gap_3()
-                                    .flex_1()
+                                    .flex_none()
+                                    .w(px(controls_w))
                                     .min_w_0()
-                                    .max_w(px(720.))
+                                    .h_full()
+                                    .min_h_0()
                                     .child(tab_bar)
-                                    .child(content),
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_h_0()
+                                            .pr_2()
+                                            .when(show_bar, |this| this.pb(px(96.)))
+                                            .overflow_y_scrollbar()
+                                            .child(content),
+                                    ),
                             ),
                     ),
             )
@@ -4222,7 +5228,7 @@ impl AppView {
                     .children(
                         match switch_id {
                             "startup-switch" => self.startup_error.clone(),
-                            "discord-switch" => self.discord_error.clone(),
+                            "discord-switch" => None,
                             _ => None,
                         }
                         .map(|error| div().text_xs().text_color(cx.theme().danger).child(error)),
@@ -4266,6 +5272,349 @@ impl AppView {
                         this.settings.save();
                         cx.notify();
                     })),
+            )
+            .into_any_element()
+    }
+
+    /// Plugins: integrations presented as app tiles. Clicking a tile opens its
+    /// detail view (Discord Rich Presence today).
+    fn render_plugins(&self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if self.plugin_open.as_deref() == Some("discord") {
+            return self.render_discord_plugin(cx);
+        }
+        let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground;
+        let border = cx.theme().border;
+        let accent = cx.theme().primary;
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
+        let enabled = self.settings.discord_presence;
+        let status = if enabled && self.presence.is_connected() {
+            ("Connected", accent)
+        } else if enabled {
+            ("Waiting for Discord", muted)
+        } else {
+            ("Off", muted)
+        };
+
+        let tile = div()
+            .id("plugin-discord")
+            .cursor_pointer()
+            .w(px(320.))
+            .flex()
+            .flex_col()
+            .gap_4()
+            .p_4()
+            .rounded_lg()
+            .border_1()
+            .border_color(Hsla { a: 0.55, ..border })
+            .bg(card_bg)
+            .hover(move |this| this.bg(Hsla { a: 0.08, ..fg }).border_color(Hsla { a: 0.55, ..accent }))
+            .child(
+                h_flex()
+                    .items_start()
+                    .gap_3()
+                    .child(
+                        div()
+                            .size(px(46.))
+                            .flex_none()
+                            .rounded_lg()
+                            .bg(Hsla { a: 0.12, ..accent })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(img(themed_discord(accent)).w(px(24.)).h(px(18.)).into_any_element()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .flex_1()
+                            .min_w_0()
+                            .child(div().text_base().font_weight(FontWeight::SEMIBOLD).text_color(fg).child("Discord Rich Presence"))
+                            .child(div().text_xs().text_color(muted).child("Show your mouse and current game in your Discord status.")),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .px_2()
+                            .py_0p5()
+                            .rounded_full()
+                            .border_1()
+                            .border_color(Hsla { a: 0.5, ..accent })
+                            .bg(Hsla { a: 0.10, ..accent })
+                            .child(Icon::new(IconName::BadgeCheck).size(px(12.)).text_color(accent))
+                            .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(accent).child("Verified by OpenMouse")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(div().size(px(7.)).rounded_full().bg(if enabled { accent } else { status.1 }))
+                            .child(div().text_xs().text_color(status.1).child(status.0)),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().text_xs().text_color(muted).child("Open plugin settings"))
+                    .child(div().text_xs().text_color(accent).child("→")),
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.plugin_open = Some("discord".into());
+                cx.notify();
+            }));
+
+        div()
+            .size_full()
+            .overflow_y_scrollbar()
+            .child(
+                div()
+                    .w_full()
+                    .max_w(rems(64.))
+                    .p_6()
+                    .flex()
+                    .flex_col()
+                    .gap_6()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(div().text_xl().font_weight(FontWeight::SEMIBOLD).child("Plugins"))
+                            .child(div().text_sm().text_color(muted).child("Optional integrations. Cards marked verified ship with OpenMouse.")),
+                    )
+                    .child(h_flex().gap_4().flex_wrap().child(tile)),
+            )
+            .into_any_element()
+    }
+
+    /// Detail view for the Discord Rich Presence plugin: enable it and choose
+    /// what it publishes, with a live preview of the status line.
+    fn render_discord_plugin(&self, cx: &mut Context<Self>) -> AnyElement {
+        let fg = cx.theme().foreground;
+        let muted = cx.theme().muted_foreground;
+        let border = cx.theme().border;
+        let accent = cx.theme().primary;
+        let card_bg = Hsla { a: 0.72, ..cx.theme().background };
+        let enabled = self.settings.discord_presence;
+
+        let verified = h_flex()
+            .gap_1()
+            .items_center()
+            .px_2()
+            .py_1()
+            .rounded_full()
+            .border_1()
+            .border_color(Hsla { a: 0.5, ..accent })
+            .bg(Hsla { a: 0.12, ..accent })
+            .child(Icon::new(IconName::BadgeCheck).size(px(13.)).text_color(accent))
+            .child(div().text_xs().font_weight(FontWeight::MEDIUM).text_color(accent).child("Verified by OpenMouse"));
+
+        let header = h_flex()
+            .items_center()
+            .gap_3()
+            .p_4()
+            .border_b_1()
+            .border_color(Hsla { a: 0.55, ..border })
+            .child(
+                div()
+                    .size(px(38.))
+                    .flex_none()
+                    .rounded_md()
+                    .bg(Hsla { a: 0.12, ..accent })
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(img(themed_discord(accent)).w(px(20.)).h(px(15.)).into_any_element()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_0p5()
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().text_base().font_weight(FontWeight::SEMIBOLD).text_color(fg).child("Discord Rich Presence"))
+                    .child(div().text_xs().text_color(muted).child("Show your mouse and current game in your Discord status.")),
+            )
+            .child(verified);
+
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .p_4()
+            .child(self.render_switch_row(
+                "discord-switch",
+                "Enable Discord Rich Presence",
+                "Requires Discord to be running. The setting stays on so it reconnects next time Discord starts.",
+                enabled,
+                cx,
+            ));
+        if enabled {
+            let s = &self.settings;
+            let device = self.connected_devices().into_iter().find(|(_, r)| r.dpi.is_some());
+            let device_name = device
+                .as_ref()
+                .and_then(|(key, _)| self.devices.tiles.iter().find(|t| &t.key == key))
+                .map(|t| t.name.clone());
+            let dpi = device.as_ref().and_then(|(_, r)| r.dpi);
+            let polling_hz = device.as_ref().and_then(|(_, r)| {
+                if r.polling_read_only && r.polling_rates.is_empty() { None } else { r.polling_hz }
+            });
+            let running_game = self.games.iter().find(|g| g.running).map(|g| g.name.clone());
+            let sample_game = running_game.is_none();
+            let game_name = running_game.unwrap_or_else(|| "Counter-Strike 2".to_string());
+            let mut lines: Vec<String> = Vec::new();
+            if s.discord_show_game {
+                lines.push(format!("Playing {game_name}"));
+            }
+            if s.discord_show_device {
+                if let Some(name) = device_name {
+                    lines.push(name);
+                }
+            }
+            if s.discord_show_stats {
+                let mut stats = Vec::new();
+                if let Some(dpi) = dpi {
+                    stats.push(format!("{dpi:.0} DPI"));
+                }
+                if let Some(hz) = polling_hz {
+                    stats.push(format!("{hz:.0} Hz"));
+                }
+                if !stats.is_empty() {
+                    lines.push(stats.join(" · "));
+                }
+            }
+            if lines.is_empty() {
+                lines.push("Managing mouse settings".into());
+            }
+            body = body
+                .child(div().h(px(1.)).w_full().bg(Hsla { a: 0.55, ..border }))
+                .child(div().text_sm().font_weight(FontWeight::MEDIUM).text_color(fg).child("What to show"))
+                .child(self.render_switch_row(
+                    "discord-device",
+                    "Connected mouse",
+                    "Your mouse's name, e.g. PRO X SUPERLIGHT 2c.",
+                    self.settings.discord_show_device,
+                    cx,
+                ))
+                .child(self.render_switch_row(
+                    "discord-game",
+                    "Current game",
+                    "\"Playing …\" while a game from your library is running.",
+                    self.settings.discord_show_game,
+                    cx,
+                ))
+                .child(self.render_switch_row(
+                    "discord-stats",
+                    "Live stats",
+                    "Your mouse's current DPI and polling rate.",
+                    self.settings.discord_show_stats,
+                    cx,
+                ))
+                .child(div().h(px(1.)).w_full().bg(Hsla { a: 0.55, ..border }))
+                .child(div().text_xs().text_color(muted).child("Discord preview"))
+                .child(
+                    div()
+                        .flex()
+                        .gap_3()
+                        .p_3()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(Hsla { a: 0.55, ..border })
+                        .bg(Hsla { a: 0.10, ..fg })
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .flex_1()
+                                .min_w_0()
+                                .child(div().text_xs().text_color(muted).child("PLAYING A GAME"))
+                                .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(fg).child("OpenMouse Desktop"))
+                                .children(lines.iter().map(|line| {
+                                    div().text_sm().text_color(muted).child(line.clone())
+                                }))
+                                .children(sample_game.then(|| {
+                                    div()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child("Example game shown — a running game replaces it automatically.")
+                                })),
+                        ),
+                );
+            let status = if let Some(error) = &self.discord_error {
+                div().text_sm().text_color(cx.theme().danger).child(error.clone()).into_any_element()
+            } else if self.presence.is_connected() {
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(div().size(px(7.)).rounded_full().bg(accent))
+                    .child(div().text_sm().text_color(muted).child("Connected to Discord"))
+                    .into_any_element()
+            } else {
+                div().text_sm().text_color(muted).child("Waiting for Discord…").into_any_element()
+            };
+            body = body.child(status);
+        }
+
+        let card = div()
+            .flex()
+            .flex_col()
+            .rounded_lg()
+            .border_1()
+            .border_color(border)
+            .bg(card_bg)
+            .overflow_hidden()
+            .child(header)
+            .child(body);
+
+        div()
+            .size_full()
+            .overflow_y_scrollbar()
+            .child(
+                div()
+                    .w_full()
+                    .max_w(rems(48.))
+                    .p_6()
+                    .flex()
+                    .flex_col()
+                    .gap_6()
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                Button::new("plugin-back")
+                                    .ghost()
+                                    .compact()
+                                    .icon(IconName::ArrowLeft)
+                                    .label("Plugins")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.plugin_open = None;
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                Button::new("plugin-site")
+                                    .ghost()
+                                    .compact()
+                                    .icon(IconName::Globe)
+                                    .label("openmouse.app")
+                                    .on_click(cx.listener(|_, _, _, cx| cx.open_url(OPENMOUSE_SITE_URL))),
+                            ),
+                    )
+                    .child(card),
             )
             .into_any_element()
     }
@@ -4450,7 +5799,7 @@ impl AppView {
                         self.render_settings_section(
                             cx,
                             "General",
-                            "Startup and integration preferences.",
+                            "Startup preferences.",
                         )
                         .child(self.render_switch_row(
                             "startup-switch",
@@ -4458,56 +5807,7 @@ impl AppView {
                             "Open OpenMouse automatically when you log in.",
                             self.settings.launch_on_startup,
                             cx,
-                        ))
-                        .child(div().h(px(1.)).w_full().bg(cx.theme().border))
-                        .child(self.render_switch_row(
-                            "discord-switch",
-                            "Discord Rich Presence",
-                            "Show OpenMouse in your Discord status. Requires Discord to be running.",
-                            self.settings.discord_presence,
-                            cx,
-                        ))
-                        .when(self.settings.discord_presence, |section| {
-                            let (details, state) = self.presence_text();
-                            section
-                                .child(div().h(px(1.)).w_full().bg(cx.theme().border))
-                                .child(div().text_sm().font_weight(FontWeight::MEDIUM).text_color(cx.theme().foreground).child("What to show"))
-                                .child(self.render_switch_row(
-                                    "discord-device",
-                                    "Connected mouse",
-                                    "Your mouse's name, e.g. PRO X SUPERLIGHT 2c.",
-                                    self.settings.discord_show_device,
-                                    cx,
-                                ))
-                                .child(self.render_switch_row(
-                                    "discord-game",
-                                    "Current game",
-                                    "\"Playing …\" while a game from your library is running.",
-                                    self.settings.discord_show_game,
-                                    cx,
-                                ))
-                                .child(self.render_switch_row(
-                                    "discord-stats",
-                                    "Live stats",
-                                    "Your mouse's current DPI and polling rate.",
-                                    self.settings.discord_show_stats,
-                                    cx,
-                                ))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap_0p5()
-                                        .p_3()
-                                        .rounded_md()
-                                        .border_1()
-                                        .border_color(cx.theme().border)
-                                        .child(div().text_xs().text_color(cx.theme().muted_foreground).child("Your status will read"))
-                                        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(cx.theme().foreground).child("OpenMouse Desktop"))
-                                        .child(div().text_sm().text_color(cx.theme().foreground).child(details))
-                                        .children((!state.is_empty()).then(|| div().text_sm().text_color(cx.theme().foreground).child(state))),
-                                )
-                        }),
+                        )),
                     )
                     .child(
                         self.render_settings_section(
@@ -4693,6 +5993,8 @@ fn release_row(entry: &crate::changelog::Entry, current: bool, c: PageColors) ->
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.ensure_control_sliders(window, cx);
+        self.ensure_single_dpi(window, cx);
+        let _ = self.record_battery_samples();
         let pages = [Page::Overview, Page::Games, Page::Supported];
         // Kit's Root paints the translucent semantic background once.
         // Keep the app shell clear so overlapping layers do not compound alpha.

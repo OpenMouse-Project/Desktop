@@ -148,8 +148,16 @@ const mockWanted = (): string => String((globalThis as any).__mock ?? "");
       await writeControl(info, status, id, value);
       // A few controls decide which others are shown (a Starlight X switch in
       // TMR mode gains its analog settings, a magnetic button's rapid trigger its
-      // sensitivity); their write returns the new layout.
-      if (id.startsWith("slx.mode") || id === "slx.link" || id === "hits.link" || id.startsWith("mag.rtOn.")) return JSON.stringify({ tabs: describeControls(brand, status, lastCaps.get(key)) });
+      // sensitivity, a DPI stage count its per-stage value sliders); their write
+      // returns the new layout.
+      if (
+        id.startsWith("slx.mode")
+        || id === "slx.link"
+        || id === "hits.link"
+        || id.startsWith("mag.rtOn.")
+        || id === "perf.dpiStageCount"
+        || id.startsWith("perf.dpiStageValue.")
+      ) return JSON.stringify({ tabs: describeControls(brand, status, lastCaps.get(key)) });
       return JSON.stringify(value);
     }
     if (action === "lighting") {
