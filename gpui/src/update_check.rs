@@ -30,19 +30,27 @@ pub struct UpdateInfo {
 /// run this off the UI thread. The per-platform `url`/`signature` fields in
 /// the updater JSON are ignored entirely at this stage.
 pub fn fetch_latest() -> Option<UpdateInfo> {
+    let latest = request_latest();
+    match &latest {
+        Ok(info) => crate::logging::log(&format!("[update] latest release is {}", info.version)),
+        Err(error) => crate::logging::log(&format!("[update] check failed: {error}")),
+    }
+    latest.ok()
+}
+
+fn request_latest() -> Result<UpdateInfo, String> {
     let output = crate::proc::quiet(
         std::process::Command::new("curl")
             .args(["-sSfL", "-m", "10"])
             .arg(LATEST_JSON_URL)
             .stdin(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null()),
     )
     .output()
-    .ok()?;
+    .map_err(|e| format!("could not run curl: {e}"))?;
     if !output.status.success() {
-        return None;
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
-    serde_json::from_slice(&output.stdout).ok()
+    serde_json::from_slice(&output.stdout).map_err(|e| format!("unreadable latest.json: {e}"))
 }
 
 /// True when `latest` is a newer version than `current`. Both are bare

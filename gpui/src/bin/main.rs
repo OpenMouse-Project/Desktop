@@ -6,6 +6,8 @@ use gpui_kit::*;
 use openmouse_gpui::app::AppView;
 
 fn main() {
+    // First, so that a crash anywhere below leaves a report.
+    openmouse_gpui::logging::init();
     // Headless mode for the installer: list the plugged-in supported devices
     // and exit before any window or background work starts.
     if let Some(path) = openmouse_gpui::supported_devices::requested_path() {

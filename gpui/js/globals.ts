@@ -23,13 +23,21 @@ const started = Date.now();
 g.performance ??= { now: () => Date.now() - started };
 
 // Timers ride on one native async sleep each; clearing just marks the id dead.
+// A throwing callback is reported, as a browser would, instead of vanishing.
+const run = (fn: (...a: unknown[]) => void, args: unknown[]) => {
+  try {
+    fn(...args);
+  } catch (error) {
+    __host.log(`[js error] timer callback: ${error} ${(error as Error)?.stack ?? ""}`);
+  }
+};
 let nextTimer = 1;
 const live = new Set<number>();
 g.setTimeout ??= (fn: (...a: unknown[]) => void, ms = 0, ...args: unknown[]) => {
   const id = nextTimer++;
   live.add(id);
   __host.sleep(Math.max(0, ms)).then(() => {
-    if (live.delete(id)) fn(...args);
+    if (live.delete(id)) run(fn, args);
   });
   return id;
 };
@@ -42,7 +50,7 @@ g.setInterval ??= (fn: (...a: unknown[]) => void, ms = 0, ...args: unknown[]) =>
   const tick = () =>
     __host.sleep(Math.max(1, ms)).then(() => {
       if (!live.has(id)) return;
-      fn(...args);
+      run(fn, args);
       tick();
     });
   tick();

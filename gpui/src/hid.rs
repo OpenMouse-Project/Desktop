@@ -338,7 +338,7 @@ impl HidService {
             .spawn(move || {
                 futures::executor::block_on(async move {
                     if let Err(error) = run(rx, sink_tx).await {
-                        eprintln!("[hid] js runtime stopped: {error}");
+                        crate::logging::log(&format!("[hid] js runtime stopped: {error}"));
                     }
                 })
             })
@@ -350,7 +350,9 @@ impl HidService {
     /// Read-only; opens nothing.
     pub fn list_candidates(&self) -> oneshot::Receiver<Result<Vec<Candidate>, String>> {
         self.call("listCandidates", None, |json| {
-            serde_json::from_str(&json).map_err(|e| e.to_string())
+            let found: Vec<Candidate> = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+            log_device_changes(&found);
+            Ok(found)
         })
     }
 
@@ -416,7 +418,9 @@ impl HidService {
     /// status once.
     pub fn connect(&self, key: &str) -> oneshot::Receiver<Result<ConnectedDevice, String>> {
         self.call("connect", Some(key.to_string()), |json| {
-            serde_json::from_str(&json).map_err(|e| e.to_string())
+            let device: ConnectedDevice = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+            crate::logging::log(&format!("[device] connected: {} ({} driver)", device.brand, device.driver));
+            Ok(device)
         })
     }
 
@@ -428,6 +432,11 @@ impl HidService {
     ) -> oneshot::Receiver<Result<T, String>> {
         let (reply, raw) = oneshot::channel();
         let (out_tx, out_rx) = oneshot::channel();
+        // What a write was changing, without the value or the device key.
+        let action = arg
+            .as_deref()
+            .and_then(|a| serde_json::from_str::<Value>(a).ok())
+            .and_then(|a| a.get("action")?.as_str().map(str::to_string));
         let _ = self.tx.unbounded_send(Msg::Call { function, arg, reply });
         std::thread::spawn(move || {
             let result = match futures::executor::block_on(raw) {
@@ -435,9 +444,37 @@ impl HidService {
                 Ok(Err(error)) => Err(error),
                 Err(_) => Err("device runtime stopped".to_string()),
             };
+            let name = match &action {
+                Some(action) => format!("{function} {action}"),
+                None => function.to_string(),
+            };
+            match &result {
+                Err(error) => crate::logging::log(&format!("[device] {name} failed: {error}")),
+                Ok(_) if matches!(function, "write" | "applyProfile" | "onboardAction") => {
+                    crate::logging::log(&format!("[device] {name} ok"))
+                }
+                Ok(_) => {}
+            }
             let _ = out_tx.send(result);
         });
         out_rx
+    }
+}
+
+/// Notes a device appearing or disappearing; a scan that finds the same set as
+/// the last one says nothing.
+fn log_device_changes(found: &[Candidate]) {
+    static LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    let mut devices: Vec<String> = found
+        .iter()
+        .map(|c| format!("{:04x}:{:04x} {}", c.info.vendor_id, c.info.product_id, c.info.product_string))
+        .collect();
+    devices.sort();
+    let now = if devices.is_empty() { "none".to_string() } else { devices.join(", ") };
+    let Ok(mut last) = LAST.lock() else { return };
+    if last.as_ref() != Some(&now) {
+        crate::logging::log(&format!("[device] available: {now}"));
+        *last = Some(now);
     }
 }
 
@@ -488,7 +525,7 @@ fn handle(ctx: &Ctx<'_>, msg: Msg) {
                 dispatch.call::<_, ()>(("hid-input-report", json))
             })();
             if let Err(error) = result {
-                eprintln!("[hid] input report dispatch failed: {error}");
+                crate::logging::log(&format!("[js error] input report dispatch failed: {error}"));
             }
         }
         Msg::Call { function, arg, reply } => {
@@ -525,6 +562,9 @@ fn describe(ctx: &Ctx<'_>, error: rquickjs::Error) -> String {
     let thrown = ctx.catch();
     if let Some(exception) = thrown.clone().into_exception() {
         if let Some(message) = exception.message() {
+            if let Some(stack) = exception.stack().filter(|s| !s.is_empty()) {
+                crate::logging::log(&format!("[js error] {message}\n{}", stack.trim_end()));
+            }
             return message;
         }
     }
@@ -569,7 +609,12 @@ fn install_host<'js>(
     )?;
     host.set(
         "log",
-        Function::new(ctx.clone(), |line: String| eprintln!("{line}"))?,
+        Function::new(ctx.clone(), |line: String| {
+            // Drivers chat on console.log and debug; keep warnings and errors.
+            if line.starts_with("[js warn]") || line.starts_with("[js error]") {
+                crate::logging::log(&line);
+            }
+        })?,
     )?;
     host.set(
         "sleep",

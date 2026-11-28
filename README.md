@@ -82,15 +82,16 @@ the installer with its SHA-256.
 
 ### Logging and crash reporting
 
-- [ ] Write log files with a size limit, including device connections, failed
+- [x] Write log files with a size limit, including device connections, failed
   reads and writes, and update checks
-- [ ] Capture errors from the embedded JavaScript drivers
-- [ ] Add a panic handler that saves a crash report with the app version, OS and
+- [x] Capture errors from the embedded JavaScript drivers
+- [x] Add a panic handler that saves a crash report with the app version, OS and
   backtrace
-- [ ] Offer to show or export the report on the next launch; send nothing
+- [x] Offer to show or export the report on the next launch; send nothing
   without the user's consent
-- [ ] Add an "Open logs folder" button
-- [ ] Keep serial numbers and personal file paths out of logs and reports
+- [x] Add an "Open logs folder" button
+- [x] Keep serial numbers and personal file paths out of logs and reports
+- [ ] Keep function names in release backtraces (release builds strip symbols)
 
 ### Safe device writes
 

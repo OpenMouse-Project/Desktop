@@ -19,6 +19,7 @@ mod appearance;
 mod ascii;
 mod chrome;
 mod controls;
+mod crash;
 mod device_io;
 mod device_page;
 mod device_state;
@@ -105,6 +106,8 @@ pub struct AppView {
     profile_device: Option<String>,
     toast: Option<Toast>,
     toast_seq: u64,
+    /// A crash report from an earlier run that has not been offered yet.
+    crash_report: Option<std::path::PathBuf>,
     /// The Updates page's virtualized list (only the rows on screen are built).
     updates_list: ListState,
     /// Newest version `update_check` has seen, if it's ahead of `APP_VERSION`.
@@ -231,6 +234,7 @@ impl AppView {
             profile_device: None,
             toast: None,
             toast_seq: 0,
+            crash_report: crate::logging::unseen_report(),
             updates_list: ListState::new(crate::changelog::entries().len() + UPDATES_LEADING_ROWS, ListAlignment::Top, px(400.)),
             update_available: None,
             checking_for_updates: false,
@@ -287,6 +291,7 @@ impl Default for AppView {
             profile_device: None,
             toast: None,
             toast_seq: 0,
+            crash_report: None,
             updates_list: ListState::new(crate::changelog::entries().len() + UPDATES_LEADING_ROWS, ListAlignment::Top, px(400.)),
             update_available: None,
             checking_for_updates: false,
@@ -498,6 +503,7 @@ impl Render for AppView {
         };
         let toast = self.render_toast(cx);
         let ascii = self.render_ascii_background(window, cx);
+        let crash_notice = self.render_crash_notice(cx);
         // The sidebar's tint and divider run the window's full height, behind
         // the title bar too; the sidebar itself is transparent over it.
         let sidebar_backdrop = div()
@@ -532,5 +538,6 @@ impl Render for AppView {
                         ),
                 ),
         )
+        .children(crash_notice)
     }
 }

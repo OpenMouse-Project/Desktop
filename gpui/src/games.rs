@@ -191,7 +191,7 @@ pub fn prefetch_art(games: &[Game]) {
             }
         }
         if target.is_file() && shrink_card_art(&target).is_none() {
-            eprintln!("[games] could not prepare card art for {}", game.id);
+            crate::logging::log(&format!("[games] could not prepare card art for {}", game.id));
         }
     }
 }
@@ -210,7 +210,7 @@ static CATALOG: std::sync::LazyLock<Vec<Game>> = std::sync::LazyLock::new(|| {
     match serde_json::from_str::<GamesFile>(GAMES_JSON) {
         Ok(file) => file.games,
         Err(e) => {
-            eprintln!("games catalog failed to parse: {e}");
+            crate::logging::log(&format!("[games] catalog failed to parse: {e}"));
             Vec::new()
         }
     }
