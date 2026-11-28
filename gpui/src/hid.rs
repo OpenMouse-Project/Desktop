@@ -495,7 +495,7 @@ async fn run(
         install_host(&ctx, api, registry, sink)?;
         // OPENMOUSE_MOCK=slx,x3 adds fake devices (no hardware) for looking at their UI.
         if let Ok(wanted) = std::env::var("OPENMOUSE_MOCK") {
-            let wanted: String = wanted.chars().filter(|c| c.is_ascii_alphanumeric() || *c == ',').collect();
+            let wanted: String = wanted.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, ',' | '!')).collect();
             ctx.eval::<(), _>(format!("globalThis.__mock = '{wanted}';"))?;
         }
         ctx.eval::<(), _>(BUNDLE)
