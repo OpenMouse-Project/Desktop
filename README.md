@@ -1,9 +1,12 @@
 # OpenMouse Desktop
 
-A native desktop app for configuring gaming mice, built with
-[GPUI](https://www.gpui.rs/). It talks to mice through the drivers in
+A native desktop app for configuring gaming mice, with keyboard support
+planned. It is built with [GPUI](https://www.gpui.rs/) and talks to mice through
+the drivers in
 [`@openmouse/protocol`](https://github.com/OpenMouse-Project/mouse-protocol),
 which run inside an embedded QuickJS runtime on top of a native HID layer.
+Keyboard drivers will come from
+[`@openmouse/keyboard-protocol`](https://github.com/OpenMouse-Project/keyboard-protocol).
 
 ## Checklist
 
@@ -74,7 +77,7 @@ the installer with its SHA-256.
   prove who published it
 - [ ] Add macOS to releases, with signing and notarization (the DMG is only
   ad-hoc signed)
-- [ ] Fix "View release" on macOS, which launches Windows `cmd`
+- [x] Fix "View release" on macOS, which launches Windows `cmd`
 - [ ] Add an automatic updates setting
 
 ### Logging and crash reporting
