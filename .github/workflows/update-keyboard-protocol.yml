@@ -18,7 +18,9 @@ concurrency:
 
 jobs:
   update:
-    runs-on: ubuntu-latest
+    # Windows, so the app's tests run as they do in build-gpui-windows.yml. The
+    # push below uses the workflow token, which starts no other workflow.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -53,12 +55,27 @@ jobs:
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "version=$latest" >> "$GITHUB_OUTPUT"
 
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.protocol.outputs.changed == 'true'
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.protocol.outputs.changed == 'true'
+        with:
+          workspaces: gpui
+          shared-key: windows
+
       - name: Build the embedded driver bundle
         if: steps.protocol.outputs.changed == 'true'
         run: node gpui/js/build.mjs
 
+      - name: Test
+        if: steps.protocol.outputs.changed == 'true'
+        run: cargo test
+        working-directory: gpui
+
       - name: Commit verified update
         if: steps.protocol.outputs.changed == 'true'
+        shell: bash
         env:
           VERSION: ${{ steps.protocol.outputs.version }}
         run: |
