@@ -285,7 +285,7 @@ impl AppView {
             None => div()
                 .text_sm()
                 .text_color(muted)
-                .child("No device found. Connect a mouse and press Rescan on the Overview page.")
+                .child("No device found. Connect a mouse and it will appear here.")
                 .into_any_element(),
             Some(tile) => match &tile.status {
                 TileStatus::Connected(r) => {

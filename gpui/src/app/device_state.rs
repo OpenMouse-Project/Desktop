@@ -5,6 +5,8 @@
 #[derive(Default)]
 pub(super) struct Devices {
     pub(super) scanning: bool,
+    /// Something changed during a scan, so look again when it finishes.
+    pub(super) rescan: bool,
     pub(super) error: Option<String>,
     pub(super) tiles: Vec<Tile>,
     pub(super) selected: usize,

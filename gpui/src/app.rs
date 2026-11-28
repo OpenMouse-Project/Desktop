@@ -213,8 +213,12 @@ impl AppView {
         // The background scans slow down while this window is not in front
         // (see `activity.rs`). Only the main window reports: the game overlay
         // never takes focus and must not count as the app being used.
-        let sub_activity = cx.observe_window_activation(window, |_this: &mut Self, window, _cx| {
-            crate::activity::ACTIVITY.set_active(window.is_window_active());
+        let sub_activity = cx.observe_window_activation(window, |this: &mut Self, window, cx| {
+            let active = window.is_window_active();
+            crate::activity::ACTIVITY.set_active(active);
+            if active {
+                this.scan_devices(cx);
+            }
         });
 
         let games = games::load_catalog();
@@ -261,6 +265,7 @@ impl AppView {
             view.set_discord(true, cx);
         }
         view.scan_devices(cx);
+        view.watch_devices(cx);
         view
     }
 

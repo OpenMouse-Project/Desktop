@@ -44,14 +44,6 @@ impl AppView {
                         1 => "1 supported device found".to_string(),
                         n => format!("{n} supported devices found"),
                     })),
-            )
-            .child(
-                Button::new("rescan")
-                    .ghost()
-                    .compact()
-                    .icon(IconName::Redo)
-                    .label(if devices.scanning { "Scanning…" } else { "Rescan" })
-                    .on_click(cx.listener(|this, _, _, cx| this.scan_devices(cx))),
             );
 
         let body: AnyElement = if let Some(tile) = devices.tiles.get(devices.selected) {
@@ -274,7 +266,7 @@ impl AppView {
             let message = match (&devices.error, devices.scanning) {
                 (Some(error), _) => format!("Could not scan for devices: {error}"),
                 (None, true) => "Looking for mice…".to_string(),
-                (None, false) => "No supported mouse found. Plug one in and press Rescan.".to_string(),
+                (None, false) => "No supported mouse found. Plug one in and it will appear here.".to_string(),
             };
             div()
                 .p_6()

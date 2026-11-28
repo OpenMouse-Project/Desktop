@@ -6,6 +6,7 @@ pub mod autostart;
 mod game_watcher;
 pub mod games;
 pub mod hid;
+mod hotplug;
 pub mod logging;
 pub mod native_window;
 pub mod overlay;

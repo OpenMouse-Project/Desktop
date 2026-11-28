@@ -1,6 +1,7 @@
 //! Scanning, connecting to and writing to devices.
 
 use super::*;
+use futures::StreamExt as _;
 
 impl AppView {
     pub(super) fn hid_service(&mut self) -> crate::hid::HidService {
@@ -12,6 +13,7 @@ impl AppView {
     /// executor.
     pub(super) fn scan_devices(&mut self, cx: &mut Context<Self>) {
         if self.devices.scanning {
+            self.devices.rescan = true;
             return;
         }
         self.devices.scanning = true;
@@ -31,6 +33,9 @@ impl AppView {
                         v.devices.scanning = false;
                         v.devices.error = Some(message);
                         cx.notify();
+                        if std::mem::take(&mut v.devices.rescan) {
+                            v.scan_devices(cx);
+                        }
                     });
                     return;
                 }
@@ -56,7 +61,11 @@ impl AppView {
                     .collect();
                 v.devices.selected = v.devices.selected.min(v.devices.tiles.len().saturating_sub(1));
                 v.devices.scanning = false;
+                v.close_unplugged_page(&old, cx);
                 cx.notify();
+                if std::mem::take(&mut v.devices.rescan) {
+                    v.scan_devices(cx);
+                }
             });
             for c in &candidates {
                 // Use the name the tile carries now: a receiver that was
@@ -89,6 +98,52 @@ impl AppView {
             });
         })
         .detach();
+    }
+
+    /// Looks again whenever a device is plugged in or removed.
+    pub(super) fn watch_devices(&mut self, cx: &mut Context<Self>) {
+        let changes = crate::hotplug::watch();
+        cx.spawn(async move |view, cx| {
+            let executor = cx.background_executor().clone();
+            let Some(mut changes) = changes else {
+                // Nothing reports plug-ins here, so check on a timer.
+                loop {
+                    crate::activity::ACTIVITY
+                        .sleep(&executor, Duration::from_secs(3), Duration::from_secs(15))
+                        .await;
+                    if view.update(cx, |v: &mut Self, cx| v.scan_devices(cx)).is_err() {
+                        return;
+                    }
+                }
+            };
+            while changes.next().await.is_some() {
+                // A device arrives one interface at a time: wait until it is quiet.
+                loop {
+                    executor.timer(Duration::from_millis(700)).await;
+                    let mut more = false;
+                    while changes.try_recv().is_ok() {
+                        more = true;
+                    }
+                    if !more {
+                        break;
+                    }
+                }
+                if view.update(cx, |v: &mut Self, cx| v.scan_devices(cx)).is_err() {
+                    return;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Leaves the settings page of a device that is no longer there. `gone`
+    /// holds the tiles the last scan did not find.
+    fn close_unplugged_page(&mut self, gone: &[Tile], cx: &mut Context<Self>) {
+        let Some(open) = self.devices.open.as_deref() else { return };
+        let Some(name) = gone.iter().find(|t| t.key == open).map(|t| t.name.clone()) else { return };
+        self.devices.open = None;
+        self.devices.staged = Staged::default();
+        self.show_toast(format!("{name} was disconnected."), false, cx);
     }
 
     pub(super) async fn load_art(
