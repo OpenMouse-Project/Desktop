@@ -89,6 +89,28 @@ the installer with its SHA-256.
 - [ ] Add an "Open logs folder" button
 - [ ] Keep serial numbers and personal file paths out of logs and reports
 
+### Safe device writes
+
+- [ ] Show an error when a write fails or is unsupported
+- [ ] Re-read the setting after a write, so the UI shows what the device has
+- [ ] Ask for confirmation before resets
+
+### Report my device
+
+- [ ] Add a "Report my device" button for hardware we do not own
+- [ ] Export the vendor and product IDs, HID descriptors and app version,
+  without serial numbers
+- [ ] Show the report to the user before anything is shared
+
+### Linux
+
+- [ ] Build and run the app on Linux
+- [ ] Get HID access without root, with udev rules
+- [ ] Check the platform features: tray, autostart, overlay, wallpaper theme,
+  game detection and opening links
+- [ ] Add a Linux build workflow
+- [ ] Package it and include it in releases and app updates
+
 ## Layout
 
 - `gpui/` — the app. `gpui/js/` is the TypeScript bundled into the app
