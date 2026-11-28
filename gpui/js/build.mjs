@@ -5,6 +5,7 @@ import { build } from "../../node_modules/esbuild/lib/main.js";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { redragonSpeedup } from "./redragon-speedup.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 await build({
@@ -25,6 +26,7 @@ await build({
   minifyIdentifiers: true,
   keepNames: true,
   legalComments: "none",
+  plugins: [redragonSpeedup],
   alias: {
     "@tauri-apps/api/core": path.join(here, "shims/tauri-core.ts"),
     "@tauri-apps/api/event": path.join(here, "shims/tauri-event.ts"),
