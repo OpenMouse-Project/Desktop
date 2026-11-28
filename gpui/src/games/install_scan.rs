@@ -590,7 +590,7 @@ mod windows_registry {
             RegCloseKey(key);
             if status != 0
                 || kind != 1
-                || size % 2 != 0
+                || !size.is_multiple_of(2)
                 || size as usize > std::mem::size_of_val(&data)
             {
                 return None;

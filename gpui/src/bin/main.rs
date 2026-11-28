@@ -57,7 +57,7 @@ fn main() {
             view.update(cx, |view, cx| view.set_page(page, cx));
         }
         // Closing the window hides it to the tray icon (where there is one).
-        let has_tray = openmouse_gpui::tray::install(cx, handle.into());
+        let has_tray = openmouse_gpui::tray::install(cx, handle);
         // Started by the OS at login (see autostart.rs): stay out of the way,
         // in the tray if there is one, else minimized.
         if openmouse_gpui::autostart::launched_by_os() {

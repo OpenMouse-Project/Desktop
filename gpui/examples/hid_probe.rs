@@ -17,7 +17,7 @@ fn main() {
     let wanted = std::env::args().skip_while(|a| a != "--key").nth(1);
     let Some(target) = candidates
         .iter()
-        .find(|c| wanted.as_deref().map_or(true, |k| c.info.key == k))
+        .find(|c| wanted.as_deref().is_none_or(|k| c.info.key == k))
     else {
         return;
     };

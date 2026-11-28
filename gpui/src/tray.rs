@@ -163,7 +163,7 @@ mod imp {
                         let _ = cx.update_window(window, |_, window, _| show(window));
                     }
                     Command::Quit => {
-                        let _ = cx.update(|cx| cx.quit());
+                        cx.update(|cx| cx.quit());
                     }
                 }
             }

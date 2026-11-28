@@ -1042,13 +1042,13 @@ mod tests {
     #[test]
     fn timed_out_helpers_are_killed() {
         #[cfg(windows)]
-        let mut slow = {
+        let slow = {
             let mut command = std::process::Command::new("cmd");
             command.args(["/c", "ping", "-n", "30", "127.0.0.1"]);
             command
         };
         #[cfg(target_os = "macos")]
-        let mut slow = {
+        let slow = {
             let mut command = std::process::Command::new("sleep");
             command.arg("30");
             command

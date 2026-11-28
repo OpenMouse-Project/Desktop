@@ -25,7 +25,7 @@ fn main() {
         );
         cx.spawn(async move |cx| {
             cx.background_executor().timer(std::time::Duration::from_secs(9)).await;
-            let _ = cx.update(|cx| cx.quit());
+            cx.update(|cx| cx.quit());
         })
         .detach();
     });
