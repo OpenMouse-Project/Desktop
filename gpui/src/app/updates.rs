@@ -177,18 +177,10 @@ impl AppView {
                     Button::new("view-release")
                         .compact()
                         .label("View release")
-                        .on_click(cx.listener(|_, _, _, _| {
+                        .on_click(cx.listener(|_, _, _, cx| {
                             // Opens the GitHub release page for a manual download —
                             // this pass is check + notify only, no in-app download/install.
-                            let _ = crate::proc::quiet(
-                                std::process::Command::new("cmd")
-                                    .args(["/C", "start", ""])
-                                    .arg("https://github.com/OpenMouse-Project/Desktop/releases/latest")
-                                    .stdin(std::process::Stdio::null())
-                                    .stdout(std::process::Stdio::null())
-                                    .stderr(std::process::Stdio::null()),
-                            )
-                            .spawn();
+                            cx.open_url("https://github.com/OpenMouse-Project/Desktop/releases/latest")
                         }))
                         .into_any_element(),
                 )
