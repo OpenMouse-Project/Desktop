@@ -77,6 +77,18 @@ the installer with its SHA-256.
 - [ ] Fix "View release" on macOS, which launches Windows `cmd`
 - [ ] Add an automatic updates setting
 
+### Logging and crash reporting
+
+- [ ] Write log files with a size limit, including device connections, failed
+  reads and writes, and update checks
+- [ ] Capture errors from the embedded JavaScript drivers
+- [ ] Add a panic handler that saves a crash report with the app version, OS and
+  backtrace
+- [ ] Offer to show or export the report on the next launch; send nothing
+  without the user's consent
+- [ ] Add an "Open logs folder" button
+- [ ] Keep serial numbers and personal file paths out of logs and reports
+
 ## Layout
 
 - `gpui/` — the app. `gpui/js/` is the TypeScript bundled into the app
